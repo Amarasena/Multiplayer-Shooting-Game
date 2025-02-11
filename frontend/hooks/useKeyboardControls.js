@@ -1,8 +1,9 @@
-//frontend/hooks/useKeyboardControls.js
-import { useEffect, useState } from 'react'
-import { useThree } from '@react-three/fiber'
+"use client"
 
-export function useKeyboardControls() {
+import { useEffect, useState } from "react"
+import { useThree } from "@react-three/fiber"
+
+export function useKeyboardControls(playerId) {
   const [movement, setMovement] = useState({
     forward: false,
     backward: false,
@@ -14,40 +15,42 @@ export function useKeyboardControls() {
   const { camera } = useThree()
 
   useEffect(() => {
-    const socket = new WebSocket('ws://192.168.56.1:12345')
+    const socket = new WebSocket("ws://192.168.56.1:12345")
 
     socket.onopen = () => {
-      console.log('Connected to the server')
+      console.log("Connected to the server")
+      // Send player ID to server
+      socket.send(JSON.stringify({ type: "init", playerId }))
     }
 
     socket.onmessage = (event) => {
       const message = JSON.parse(event.data)
-      console.log('Received from server:', message)
+      console.log("Received from server:", message)
 
-      // Example: Handling player positions from the server
-      if (message.type === 'playerPosition') {
-        camera.position.set(message.x, message.y, message.z)
+      // Handle messages for other players
+      if (message.playerId !== playerId) {
+        // Update remote player state (handled in Game.js)
       }
     }
 
     const handleKeyDown = (event) => {
-      let newMovement = { ...movement }
+      const newMovement = { ...movement }
       let shouldSend = false
 
       switch (event.code) {
-        case 'KeyW':
+        case "KeyW":
           newMovement.forward = true
           shouldSend = true
           break
-        case 'KeyS':
+        case "KeyS":
           newMovement.backward = true
           shouldSend = true
           break
-        case 'KeyA':
+        case "KeyA":
           newMovement.left = true
           shouldSend = true
           break
-        case 'KeyD':
+        case "KeyD":
           newMovement.right = true
           shouldSend = true
           break
@@ -55,28 +58,28 @@ export function useKeyboardControls() {
 
       if (shouldSend) {
         setMovement(newMovement)
-        socket.send(JSON.stringify({ type: 'keydown', key: event.code }))
+        socket.send(JSON.stringify({ type: "keydown", key: event.code, playerId }))
       }
     }
 
     const handleKeyUp = (event) => {
-      let newMovement = { ...movement }
+      const newMovement = { ...movement }
       let shouldSend = false
 
       switch (event.code) {
-        case 'KeyW':
+        case "KeyW":
           newMovement.forward = false
           shouldSend = true
           break
-        case 'KeyS':
+        case "KeyS":
           newMovement.backward = false
           shouldSend = true
           break
-        case 'KeyA':
+        case "KeyA":
           newMovement.left = false
           shouldSend = true
           break
-        case 'KeyD':
+        case "KeyD":
           newMovement.right = false
           shouldSend = true
           break
@@ -84,7 +87,7 @@ export function useKeyboardControls() {
 
       if (shouldSend) {
         setMovement(newMovement)
-        socket.send(JSON.stringify({ type: 'keyup', key: event.code }))
+        socket.send(JSON.stringify({ type: "keyup", key: event.code, playerId }))
       }
     }
 
@@ -96,26 +99,27 @@ export function useKeyboardControls() {
         }
 
         setRotation(newRotation)
-        socket.send(JSON.stringify({ type: 'mouseMove', rotation: newRotation }))
+        socket.send(JSON.stringify({ type: "mouseMove", rotation: newRotation, playerId }))
       }
     }
 
-    window.addEventListener('keydown', handleKeyDown)
-    window.addEventListener('keyup', handleKeyUp)
-    window.addEventListener('mousemove', handleMouseMove)
+    window.addEventListener("keydown", handleKeyDown)
+    window.addEventListener("keyup", handleKeyUp)
+    window.addEventListener("mousemove", handleMouseMove)
 
     return () => {
-      window.removeEventListener('keydown', handleKeyDown)
-      window.removeEventListener('keyup', handleKeyUp)
-      window.removeEventListener('mousemove', handleMouseMove)
+      window.removeEventListener("keydown", handleKeyDown)
+      window.removeEventListener("keyup", handleKeyUp)
+      window.removeEventListener("mousemove", handleMouseMove)
       socket.close()
     }
-  }, [movement, rotation, camera]) // Ensure dependencies are handled properly
+  }, [movement, rotation, playerId])
 
   useEffect(() => {
     camera.rotation.x = rotation.x
     camera.rotation.y = rotation.y
-  }, [rotation, camera])
+  }, [rotation])
 
   return movement
 }
+
