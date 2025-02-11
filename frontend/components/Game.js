@@ -1,3 +1,4 @@
+//frontend/components/Game.js
 "use client"
 
 import { Physics } from "@react-three/cannon"
