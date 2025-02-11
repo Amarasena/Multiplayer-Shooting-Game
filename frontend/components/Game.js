@@ -13,6 +13,7 @@ import { Tree } from "./map/Tree";
 function Player() {
   const meshRef = useRef();
   const bulletRef = useRef(); // Fix: Initialize bulletRef
+
   const { camera, gl } = useThree();
   const { forward, backward, left, right, shooting } = useKeyboardControls();
 
@@ -21,6 +22,7 @@ function Player() {
   const [isShooting, setIsShooting] = useState(false);
 
   // Mouse movement listener to update rotation
+
   useEffect(() => {
     const handleMouseMove = (event) => {
       const sensitivity = 0.002;
