@@ -1,123 +1,91 @@
-"use client";
+"use client"
 
-import { Physics } from "@react-three/cannon";
-import { Box, PerspectiveCamera, Sky, Sphere } from "@react-three/drei";
-import { Canvas, useFrame, useThree } from "@react-three/fiber";
-import { useEffect, useRef, useState } from "react";
-import { Euler, Vector3 } from "three";
-import { useKeyboardControls } from "../hooks/useKeyboardControls";
-import Block, { BLOCK_POSITIONS } from "./map/Block";
-import { checkBoundary, Ground } from "./map/Ground";
-import { Tree } from "./map/Tree";
+import { Physics } from "@react-three/cannon"
+import { Box, PerspectiveCamera, Sky, Sphere } from "@react-three/drei"
+import { Canvas, useFrame, useThree } from "@react-three/fiber"
+import { useEffect, useRef, useState } from "react"
+import { Euler, Vector3 } from "three"
+import { useKeyboardControls } from "../hooks/useKeyboardControls"
+import Block, { BLOCK_POSITIONS } from "./map/Block"
+import { checkBoundary, Ground } from "./map/Ground"
+import { Tree } from "./map/Tree"
 
-function Player() {
-  const meshRef = useRef();
-  const bulletRef = useRef(); // Fix: Initialize bulletRef
+function LocalPlayer() {
+  const meshRef = useRef()
+  const bulletRef = useRef()
+  const { camera, gl } = useThree()
+  const { forward, backward, left, right, shooting } = useKeyboardControls()
 
-  const { camera, gl } = useThree();
-  const { forward, backward, left, right, shooting } = useKeyboardControls();
+  const [rotation, setRotation] = useState({ yaw: 0, pitch: 0 })
+  const [bulletPosition, setBulletPosition] = useState(new Vector3(0, -10, 0))
+  const [isShooting, setIsShooting] = useState(false)
 
-  const [rotation, setRotation] = useState({ yaw: 0, pitch: 0 }); // Yaw and Pitch angles
-  const [bulletPosition, setBulletPosition] = useState(new Vector3(0, -10, 0));
-  const [isShooting, setIsShooting] = useState(false);
-
-  // Mouse movement listener to update rotation
 
   useEffect(() => {
     const handleMouseMove = (event) => {
-      const sensitivity = 0.002;
+      const sensitivity = 0.002
       setRotation((prev) => ({
         yaw: prev.yaw - event.movementX * sensitivity,
-        pitch: Math.max(
-          -Math.PI / 2,
-          Math.min(Math.PI / 2, prev.pitch - event.movementY * sensitivity)
-        ), // Clamp pitch to prevent flipping
-      }));
-    };
+        pitch: Math.max(-Math.PI / 2, Math.min(Math.PI / 2, prev.pitch - event.movementY * sensitivity)),
+      }))
+    }
 
-    gl.domElement.requestPointerLock =
-      gl.domElement.requestPointerLock || gl.domElement.mozRequestPointerLock;
-    gl.domElement.exitPointerLock =
-      gl.domElement.exitPointerLock || gl.domElement.mozExitPointerLock;
+    gl.domElement.requestPointerLock = gl.domElement.requestPointerLock || gl.domElement.mozRequestPointerLock
+    gl.domElement.exitPointerLock = gl.domElement.exitPointerLock || gl.domElement.mozExitPointerLock
 
     const handleClick = () => {
-      gl.domElement.requestPointerLock();
-    };
+      gl.domElement.requestPointerLock()
+    }
 
-    gl.domElement.addEventListener("click", handleClick);
-    document.addEventListener("mousemove", handleMouseMove);
+    gl.domElement.addEventListener("click", handleClick)
+    document.addEventListener("mousemove", handleMouseMove)
 
     return () => {
-      document.removeEventListener("mousemove", handleMouseMove);
-      gl.domElement.removeEventListener("click", handleClick);
-    };
-  }, [gl]);
+      document.removeEventListener("mousemove", handleMouseMove)
+      gl.domElement.removeEventListener("click", handleClick)
+    }
+  }, [gl])
 
   useFrame((state, delta) => {
     if (meshRef.current && camera) {
-      const speed = 5;
-      const direction = new Vector3();
+      const speed = 5
+      const direction = new Vector3()
 
-      // Movement logic
-      if (forward) direction.z -= 1;
-      if (backward) direction.z += 1;
-      if (left) direction.x -= 1;
-      if (right) direction.x += 1;
-      direction.normalize().applyEuler(new Euler(0, rotation.yaw, 0)); // Apply player yaw rotation
-      direction.multiplyScalar(speed * delta);
+      if (forward) direction.z -= 1
+      if (backward) direction.z += 1
+      if (left) direction.x -= 1
+      if (right) direction.x += 1
+      direction.normalize().applyEuler(new Euler(0, rotation.yaw, 0))
+      direction.multiplyScalar(speed * delta)
 
-      // Calculate new position
-      const newPosition = meshRef.current.position.clone().add(direction);
+      const newPosition = meshRef.current.position.clone().add(direction)
+      const constrainedPosition = checkBoundary(newPosition.x, newPosition.z)
+      meshRef.current.position.set(constrainedPosition.x, meshRef.current.position.y, constrainedPosition.z)
 
-      // Apply boundary constraints
-      const constrainedPosition = checkBoundary(newPosition.x, newPosition.z);
-      meshRef.current.position.set(
-        constrainedPosition.x,
-        meshRef.current.position.y,
-        constrainedPosition.z
-      );
+      meshRef.current.rotation.set(0, rotation.yaw, 0)
 
-      // Update player position
-      meshRef.current.position.add(direction);
+      const cameraOffset = new Vector3(0, 3, 5).applyEuler(new Euler(0, rotation.yaw, 0))
+      camera.position.copy(meshRef.current.position).add(cameraOffset)
+      camera.lookAt(meshRef.current.position)
 
-      // Update player's rotation
-      meshRef.current.rotation.set(0, rotation.yaw, 0);
-
-      // Update camera position and rotation
-      const cameraOffset = new Vector3(0, 3, 5).applyEuler(
-        new Euler(0, rotation.yaw, 0)
-      );
-      camera.position.copy(meshRef.current.position).add(cameraOffset);
-      camera.lookAt(meshRef.current.position);
-
-      // Shooting logic
       if (isShooting && bulletRef.current) {
-        const bulletDirection = new Vector3(0, 0, -1).applyEuler(
-          new Euler(0, rotation.yaw, 0)
-        );
-        bulletRef.current.position.add(
-          bulletDirection.multiplyScalar(delta * 50)
-        );
+        const bulletDirection = new Vector3(0, 0, -1).applyEuler(new Euler(0, rotation.yaw, 0))
+        bulletRef.current.position.add(bulletDirection.multiplyScalar(delta * 50))
 
-        // Reset bullet if too far
-        if (
-          bulletRef.current.position.distanceTo(meshRef.current.position) > 100
-        ) {
-          setIsShooting(false);
-          setBulletPosition(new Vector3(0, -10, 0));
+        if (bulletRef.current.position.distanceTo(meshRef.current.position) > 100) {
+          setIsShooting(false)
+          setBulletPosition(new Vector3(0, -10, 0))
         }
       }
     }
-  });
+  })
 
   useEffect(() => {
     if (shooting && !isShooting && meshRef.current) {
-      setIsShooting(true);
-      setBulletPosition(
-        meshRef.current.position.clone().add(new Vector3(0, 1, 0))
-      );
+      setIsShooting(true)
+      setBulletPosition(meshRef.current.position.clone().add(new Vector3(0, 1, 0)))
     }
-  }, [shooting, isShooting]);
+  }, [shooting, isShooting])
 
   return (
     <>
@@ -128,7 +96,15 @@ function Player() {
         <meshStandardMaterial color="yellow" />
       </Sphere>
     </>
-  );
+  )
+}
+
+function RemotePlayer({ position, rotation }) {
+  return (
+    <Box args={[1, 2, 1]} position={position} rotation={rotation} castShadow>
+      <meshStandardMaterial color="blue" />
+    </Box>
+  )
 }
 
 function Blocks() {
@@ -138,11 +114,11 @@ function Blocks() {
         <Block key={index} position={position} />
       ))}
     </>
-  );
+  )
 }
 
 function GameGround() {
-  return <Ground />;
+  return <Ground />
 }
 
 function Trees() {
@@ -152,10 +128,10 @@ function Trees() {
       <Tree position={[10, 0, -3]} />
       <Tree position={[-10, 0, -10]} />
     </>
-  );
+  )
 }
 
-function Scene() {
+function Scene({ remotePlayerPosition, remotePlayerRotation }) {
   return (
     <>
       <PerspectiveCamera makeDefault position={[0, 3, 5]} />
@@ -168,7 +144,8 @@ function Scene() {
         shadow-mapSize-height={2048}
       />
       <Physics>
-        <Player />
+        <LocalPlayer />
+        <RemotePlayer position={remotePlayerPosition} rotation={remotePlayerRotation} />
         <GameGround />
         <Trees />
         <Blocks />
@@ -176,15 +153,43 @@ function Scene() {
       <Sky sunPosition={[100, 20, 100]} />
       <fog attach="fog" args={["#f0f0f0", 0, 100]} />
     </>
-  );
+  )
 }
 
 export default function Game() {
+  const [remotePlayerPosition, setRemotePlayerPosition] = useState([5, 1, 5])
+  const [remotePlayerRotation, setRemotePlayerRotation] = useState([0, 0, 0])
+
+  useEffect(() => {
+    const socket = new WebSocket("ws://192.168.56.1:12345")
+
+    socket.onopen = () => {
+      console.log("Connected to the server")
+    }
+
+    socket.onmessage = (event) => {
+      const message = JSON.parse(event.data)
+      console.log("Received from server:", message)
+
+      if (message.type === "playerPosition") {
+        setRemotePlayerPosition([message.x, message.y, message.z])
+      }
+      if (message.type === "playerRotation") {
+        setRemotePlayerRotation([message.x, message.y, message.z])
+      }
+    }
+
+    return () => {
+      socket.close()
+    }
+  }, [])
+
   return (
     <div className="w-full h-screen">
       <Canvas shadows>
-        <Scene />
+        <Scene remotePlayerPosition={remotePlayerPosition} remotePlayerRotation={remotePlayerRotation} />
       </Canvas>
     </div>
-  );
+  )
 }
+
