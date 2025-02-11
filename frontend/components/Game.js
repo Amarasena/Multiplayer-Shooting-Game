@@ -1,4 +1,3 @@
-//frontend/components/Game.js
 "use client"
 
 import { Physics } from "@react-three/cannon"
@@ -20,6 +19,7 @@ function LocalPlayer() {
   const [rotation, setRotation] = useState({ yaw: 0, pitch: 0 })
   const [bulletPosition, setBulletPosition] = useState(new Vector3(0, -10, 0))
   const [isShooting, setIsShooting] = useState(false)
+
 
   useEffect(() => {
     const handleMouseMove = (event) => {
