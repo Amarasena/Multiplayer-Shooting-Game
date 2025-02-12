@@ -1,4 +1,3 @@
-//socket/WebSocketServer.java
 package socket;
 
 import java.io.*;
