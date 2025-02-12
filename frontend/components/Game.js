@@ -158,7 +158,7 @@ export default function Game() {
   const [players, setPlayers] = useState([])
 
   useEffect(() => {
-    const socket = new WebSocket("ws://192.168.56.1:12345")
+    const socket = new WebSocket("ws://192.168.224.206:12345")
     const localPlayerId = Math.random().toString(36).substr(2, 9)
 
     socket.onopen = () => {
