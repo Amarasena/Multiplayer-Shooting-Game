@@ -13,7 +13,7 @@ class WebSocketManager {
             this.socket = new WebSocket(url);
 
             this.socket.onopen = () => console.log("WebSocket connected");
-            this.socket.onclose = () => console.log("WebSocket disconnected");
+            this.socket.onclose = ()  => console.log("WebSocket disconnected");
             this.socket.onerror = (error) => console.error("WebSocket error:", error);
         }
     }

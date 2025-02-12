@@ -83,7 +83,8 @@ function Player({ isLocal, playerId, initialPosition }) {
         }
       }
     }
-  })
+  }
+)
 
   useEffect(() => {
     if (isLocal && controls.shooting && !isShooting && meshRef.current) {
@@ -160,33 +161,38 @@ export default function Game() {
 
   useEffect(() => {
     if (!socket) return;
-
-    socket.onopen = () => {
-      console.log("Connected to the server");
-      socket.send(JSON.stringify({ type: "init", playerId: localPlayerId }));
-    };
-
-    socket.onmessage = (event) => {
+  
+    const handleMessage = (event) => {
       const message = JSON.parse(event.data);
       console.log("Received from server:", message);
-
+  
       if (message.type === "playerList") {
-        setPlayers(message.players.map((player) => ({
-          ...player,
-          isLocal: player.id === localPlayerId
-        })));
+        setPlayers(
+          message.players.map((player) => ({
+            ...player,
+            isLocal: player.id === localPlayerId.current,
+          }))
+        );
       } else if (message.type === "playerUpdate") {
         setPlayers((prevPlayers) =>
-          prevPlayers.map((player) => 
+          prevPlayers.map((player) =>
             player.id === message.playerId ? { ...player, ...message.data } : player
           )
         );
       }
     };
-
+  
+    socket.addEventListener("message", handleMessage);
+  
+    // Ensure the WebSocket is actually open before sending messages
+    socket.addEventListener("open", () => {
+      console.log("WebSocket connection established.");
+      socket.send(JSON.stringify({ type: "init", playerId: localPlayerId.current }));
+    });
+  
     return () => {
-      socket.onmessage = null;
-      socket.onopen = null;
+      socket.removeEventListener("message", handleMessage);
+      socket.removeEventListener("open", () => {});
     };
   }, [socket]);
 
