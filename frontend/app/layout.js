@@ -1,4 +1,6 @@
+//frontend/app/layout.js
 import "./globals.css";
+import { WebSocketProvider } from "@/hooks/WebSocketProvider"; "@/hooks/WebSocketProvider"
 
 
 export const metadata = {
@@ -10,7 +12,9 @@ export default function RootLayout({ children }) {
   return (
     <html lang="en">
       <body>
-        {children}
+        <WebSocketProvider>
+          {children}
+        </WebSocketProvider>
       </body>
     </html>
   );
