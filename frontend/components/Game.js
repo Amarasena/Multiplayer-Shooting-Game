@@ -1,22 +1,19 @@
-//frontend/components/Game.js
-"use client"
-
 import { Physics } from "@react-three/cannon"
 import { Box, PerspectiveCamera, Sky, Sphere } from "@react-three/drei"
 import { Canvas, useFrame, useThree } from "@react-three/fiber"
 import { useEffect, useRef, useState } from "react"
 import { Euler, Vector3 } from "three"
 import { useKeyboardControls } from "../hooks/useKeyboardControls"
+import { useWebSocket } from "../hooks/WebSocketProvider"
 import Block, { BLOCK_POSITIONS } from "./map/Block"
 import { checkBoundary, Ground } from "./map/Ground"
 import { Tree } from "./map/Tree"
-import { useWebSocket } from "../hooks/WebSocketProvider"
 
-function Player({ isLocal, playerId, initialPosition }) {
+function Player({ isLocal, playerId, initialPosition, movement }) {
   const meshRef = useRef()
   const bulletRef = useRef()
   const { camera, gl } = useThree()
-  const controls = useKeyboardControls(playerId) // Moved hook call outside conditional
+  const controls = useKeyboardControls(playerId)
 
   const [rotation, setRotation] = useState({ yaw: 0, pitch: 0 })
   const [bulletPosition, setBulletPosition] = useState(new Vector3(0, -10, 0))
@@ -81,10 +78,12 @@ function Player({ isLocal, playerId, initialPosition }) {
             setBulletPosition(new Vector3(0, -10, 0))
           }
         }
+
+        // Send player movement to the server
+        sendPlayerMovement(meshRef.current.position)
       }
     }
-  }
-)
+  })
 
   useEffect(() => {
     if (isLocal && controls.shooting && !isShooting && meshRef.current) {
@@ -92,6 +91,22 @@ function Player({ isLocal, playerId, initialPosition }) {
       setBulletPosition(meshRef.current.position.clone().add(new Vector3(0, 1, 0)))
     }
   }, [controls, isShooting, isLocal])
+
+  // Function to send player movement data to the server
+  const sendPlayerMovement = (position) => {
+    const movementData = {
+      type: "playerMovement",
+      playerId,
+      movement: {
+        position: position.toArray(),
+        forward: controls.forward,
+        backward: controls.backward,
+        left: controls.left,
+        right: controls.right,
+      }
+    }
+    sendMessage(JSON.stringify(movementData))
+  }
 
   return (
     <>
@@ -107,30 +122,6 @@ function Player({ isLocal, playerId, initialPosition }) {
   )
 }
 
-function Blocks() {
-  return (
-    <>
-      {BLOCK_POSITIONS.map((position, index) => (
-        <Block key={index} position={position} />
-      ))}
-    </>
-  )
-}
-
-function GameGround() {
-  return <Ground />
-}
-
-function Trees() {
-  return (
-    <>
-      <Tree position={[-5, 0, -5]} />
-      <Tree position={[10, 0, -3]} />
-      <Tree position={[-10, 0, -10]} />
-    </>
-  )
-}
-
 function Scene({ players }) {
   return (
     <>
@@ -139,7 +130,7 @@ function Scene({ players }) {
       <directionalLight position={[10, 10, 5]} intensity={1} castShadow />
       <Physics>
         {players.map((player) => (
-          <Player key={player.id} isLocal={player.isLocal} playerId={player.id} initialPosition={player.position} />
+          <Player key={player.id} isLocal={player.isLocal} playerId={player.id} initialPosition={player.position} movement={player.movement} />
         ))}
         <Ground />
         {BLOCK_POSITIONS.map((position, index) => (
@@ -153,48 +144,47 @@ function Scene({ players }) {
   );
 }
 
-
 export default function Game() {
   const [players, setPlayers] = useState([])
-  const socket = useWebSocket();
-  const localPlayerId = Math.random().toString(36).substr(2, 9);
+  const socket = useWebSocket()
+  const localPlayerId = Math.random().toString(36).substr(2, 9)
 
   useEffect(() => {
-    if (!socket) return;
-  
+    if (!socket) return
+
     const handleMessage = (event) => {
-      const message = JSON.parse(event.data);
-      console.log("Received from server:", message);
-  
+      const message = JSON.parse(event.data)
+      console.log("Received from server:", message)
+
       if (message.type === "playerList") {
         setPlayers(
           message.players.map((player) => ({
             ...player,
-            isLocal: player.id === localPlayerId.current,
+            isLocal: player.id === localPlayerId,
           }))
-        );
+        )
       } else if (message.type === "playerUpdate") {
         setPlayers((prevPlayers) =>
           prevPlayers.map((player) =>
-            player.id === message.playerId ? { ...player, ...message.data } : player
+            player.id === message.playerId ? { ...player, movement: message.movement } : player
           )
-        );
+        )
       }
-    };
-  
-    socket.addEventListener("message", handleMessage);
-  
+    }
+
+    socket.addEventListener("message", handleMessage)
+
     // Ensure the WebSocket is actually open before sending messages
     socket.addEventListener("open", () => {
-      console.log("WebSocket connection established.");
-      socket.send(JSON.stringify({ type: "init", playerId: localPlayerId.current }));
-    });
-  
+      console.log("WebSocket connection established.")
+      socket.send(JSON.stringify({ type: "init", playerId: localPlayerId }))
+    })
+
     return () => {
-      socket.removeEventListener("message", handleMessage);
-      socket.removeEventListener("open", () => {});
-    };
-  }, [socket]);
+      socket.removeEventListener("message", handleMessage)
+      socket.removeEventListener("open", () => {})
+    }
+  }, [socket])
 
   return (
     <div className="w-full h-screen">
@@ -202,5 +192,5 @@ export default function Game() {
         <Scene players={players} />
       </Canvas>
     </div>
-  );
+  )
 }

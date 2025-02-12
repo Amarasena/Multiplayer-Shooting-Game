@@ -1,3 +1,4 @@
+// socket/src/main/java/socket/WebSocketServer.java
 package socket;
 
 import java.io.*;
@@ -12,6 +13,7 @@ import org.json.JSONArray;
 public class WebSocketServer {
     private static final int PORT = 9090;
     private static final Map<String, Socket> players = new ConcurrentHashMap<>();
+    private static final Map<String, Map<String, Boolean>> playerMovements = new ConcurrentHashMap<>();
 
     public static void main(String[] args) {
         System.out.println("Socket is starting");
@@ -64,6 +66,7 @@ public class WebSocketServer {
             // Add the player
             String playerId = UUID.randomUUID().toString();
             players.put(playerId, clientSocket);
+            playerMovements.put(playerId, new HashMap<>());
             System.out.println("New player joined: " + playerId);
             sendPlayerListToAll();
 
@@ -75,10 +78,40 @@ public class WebSocketServer {
                     break;
                 }
                 System.out.println("Received: " + message);
+                handlePlayerMovement(message, playerId);
             }
         } catch (IOException e) {
             handleDisconnection(clientSocket);
         }
+    }
+
+    private static void handlePlayerMovement(String message, String playerId) {
+        JSONObject jsonMessage = new JSONObject(message);
+        if ("playerMovement".equals(jsonMessage.getString("type"))) {
+            // Extract movement as a JSONObject
+            JSONObject movementJson = jsonMessage.getJSONObject("movement");
+
+            // Convert the movement JSONObject to a Map<String, Boolean>
+            Map<String, Boolean> movement = new HashMap<>();
+            for (String key : movementJson.keySet()) {
+                movement.put(key, movementJson.getBoolean(key)); // Assuming movement values are booleans
+            }
+
+            // Update player movement information
+            playerMovements.get(playerId).putAll(movement);
+
+            // Broadcast player movement to all clients
+            broadcastPlayerUpdate(playerId, playerMovements.get(playerId));
+        }
+    }
+
+    private static void broadcastPlayerUpdate(String playerId, Map<String, Boolean> movement) {
+        JSONObject json = new JSONObject();
+        json.put("type", "playerUpdate");
+        json.put("playerId", playerId);
+        json.put("movement", new JSONObject(movement));
+
+        broadcastMessage(json.toString());
     }
 
     private static void broadcastMessage(String message) {
@@ -112,6 +145,7 @@ public class WebSocketServer {
 
         if (disconnectedPlayerId != null) {
             players.remove(disconnectedPlayerId);
+            playerMovements.remove(disconnectedPlayerId);
             System.out.println("Player disconnected: " + disconnectedPlayerId);
             sendPlayerListToAll();
         }
@@ -162,17 +196,17 @@ public class WebSocketServer {
     private static String readWebSocketMessage(Socket socket) throws IOException {
         InputStream inputStream = socket.getInputStream();
         int firstByte = inputStream.read();
-    
+
         if (firstByte == -1) {
             return null; // Connection closed
         }
-    
+
         int opcode = firstByte & 0x0F;
         if (opcode == 0x8) {
             System.out.println("Received Close Frame. Client is disconnecting...");
             return null; // Handle WebSocket close frame
         }
-    
+
         int payloadLength = inputStream.read() & 0x7F;
         if (payloadLength == 126) {
             payloadLength = ((inputStream.read() & 0xFF) << 8) | (inputStream.read() & 0xFF);
@@ -182,26 +216,23 @@ public class WebSocketServer {
             }
             payloadLength = ((inputStream.read() & 0xFF) << 8) | (inputStream.read() & 0xFF);
         }
-    
+
         byte[] mask = new byte[4];
         int maskRead = inputStream.read(mask, 0, 4);
         if (maskRead < 4) {
             return null; // Prevent crash if mask is incomplete
         }
-    
+
         byte[] encodedMessage = new byte[payloadLength];
         int bytesRead = inputStream.read(encodedMessage, 0, payloadLength);
         if (bytesRead < payloadLength) {
             return null; // Prevent crash if message is incomplete
         }
-    
+
         for (int i = 0; i < payloadLength; i++) {
             encodedMessage[i] ^= mask[i % 4]; // Unmasking
         }
-    
+
         return new String(encodedMessage);
     }
-    
-
-
 }
