@@ -15,7 +15,7 @@ export function useKeyboardControls(playerId) {
   const { camera } = useThree()
 
   useEffect(() => {
-    const socket = new WebSocket("ws://192.168.224.206:12345")
+    const socket = new WebSocket("ws://192.168.224.206:9090")
 
     socket.onopen = () => {
       console.log("Connected to the server")

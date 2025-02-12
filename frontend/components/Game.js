@@ -158,13 +158,17 @@ export default function Game() {
   const [players, setPlayers] = useState([])
 
   useEffect(() => {
-    const socket = new WebSocket("ws://192.168.224.206:12345")
+    const socket = new WebSocket("ws://192.168.224.206:9090")
     const localPlayerId = Math.random().toString(36).substr(2, 9)
 
     socket.onopen = () => {
       console.log("Connected to the server")
       socket.send(JSON.stringify({ type: "init", playerId: localPlayerId }))
     }
+
+    socket.onerror = (error) => {
+      console.error("WebSocket error:", error);
+    };
 
     socket.onmessage = (event) => {
       const message = JSON.parse(event.data)
@@ -183,6 +187,10 @@ export default function Game() {
         )
       }
     }
+
+    socket.onclose = (event) => {
+      console.log("Connection closed", event);
+    };
 
     return () => {
       socket.close()

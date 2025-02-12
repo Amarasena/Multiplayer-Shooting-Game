@@ -5,15 +5,16 @@ import java.net.*;
 import java.security.MessageDigest;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.Base64;
+
 import org.json.JSONObject;
 import org.json.JSONArray;
 
 public class WebSocketServer {
-    private static final int PORT = 12345;
-    private static final Map<Socket, String> players = new ConcurrentHashMap<>();
+    private static final int PORT = 9090;
+    private static final Map<String, Socket> players = new ConcurrentHashMap<>();
 
     public static void main(String[] args) {
+        System.out.println("Socket is starting");
         try (ServerSocket serverSocket = new ServerSocket(PORT)) {
             System.out.println("WebSocket Server started on port " + PORT);
 
@@ -29,30 +30,26 @@ public class WebSocketServer {
     }
 
     private static void handleClient(Socket clientSocket) {
-        try (BufferedReader reader = new BufferedReader(new InputStreamReader(clientSocket.getInputStream()));
-             OutputStream outputStream = clientSocket.getOutputStream()) {
-
-            String playerId = UUID.randomUUID().toString();
-            players.put(clientSocket, playerId);
-            System.out.println("New player joined: " + playerId);
-
-            sendPlayerListToAll();
-
-            // WebSocket handshake
+        try (
+                BufferedReader reader = new BufferedReader(new InputStreamReader(clientSocket.getInputStream()));
+                OutputStream outputStream = clientSocket.getOutputStream()) {
             String webSocketKey = null;
             String line;
-            while (!(line = reader.readLine()).isEmpty()) {
+
+            // Read the handshake request properly
+            while ((line = reader.readLine()) != null && !line.isEmpty()) {
                 if (line.startsWith("Sec-WebSocket-Key: ")) {
                     webSocketKey = line.substring(19).trim();
                 }
             }
 
             if (webSocketKey == null) {
-                System.out.println("Invalid WebSocket request.");
+                System.out.println("Invalid WebSocket request. Closing connection.");
                 clientSocket.close();
                 return;
             }
 
+            // Respond with proper WebSocket handshake
             String acceptKey = generateAcceptKey(webSocketKey);
             String response = "HTTP/1.1 101 Switching Protocols\r\n" +
                     "Upgrade: websocket\r\n" +
@@ -61,34 +58,23 @@ public class WebSocketServer {
 
             outputStream.write(response.getBytes());
             outputStream.flush();
+
             System.out.println("Handshake completed. WebSocket connection established!");
 
-            // Handle messages
+            // Add the player
+            String playerId = UUID.randomUUID().toString();
+            players.put(playerId, clientSocket);
+            System.out.println("New player joined: " + playerId);
+            sendPlayerListToAll();
+
+            // Keep listening for messages
             while (true) {
                 String message = readWebSocketMessage(clientSocket);
                 if (message == null) {
                     handleDisconnection(clientSocket);
                     break;
                 }
-
                 System.out.println("Received: " + message);
-
-                // Parse the JSON message
-                JSONObject json = new JSONObject(message);
-                String type = json.getString("type");
-
-                if (type.equals("movement")) {
-                    String movingPlayerId = json.getString("playerId");
-                    JSONObject position = json.getJSONObject("position");
-
-                    // Broadcast the movement update to all clients
-                    JSONObject movementUpdate = new JSONObject();
-                    movementUpdate.put("type", "movement");
-                    movementUpdate.put("playerId", movingPlayerId);
-                    movementUpdate.put("position", position);
-
-                    broadcastMessage(movementUpdate.toString());
-                }
             }
         } catch (IOException e) {
             handleDisconnection(clientSocket);
@@ -96,7 +82,7 @@ public class WebSocketServer {
     }
 
     private static void broadcastMessage(String message) {
-        for (Socket client : players.keySet()) {
+        for (Socket client : players.values()) {
             try {
                 sendWebSocketMessage(client.getOutputStream(), message);
             } catch (IOException e) {
@@ -106,7 +92,7 @@ public class WebSocketServer {
     }
 
     private static void sendPlayerListToAll() {
-        JSONArray playerArray = new JSONArray(players.values());
+        JSONArray playerArray = new JSONArray(players.keySet());
 
         JSONObject json = new JSONObject();
         json.put("type", "playerList");
@@ -116,9 +102,17 @@ public class WebSocketServer {
     }
 
     private static void handleDisconnection(Socket clientSocket) {
-        if (players.containsKey(clientSocket)) {
-            String playerId = players.remove(clientSocket);
-            System.out.println("Player disconnected: " + playerId);
+        String disconnectedPlayerId = null;
+        for (Map.Entry<String, Socket> entry : players.entrySet()) {
+            if (entry.getValue().equals(clientSocket)) {
+                disconnectedPlayerId = entry.getKey();
+                break;
+            }
+        }
+
+        if (disconnectedPlayerId != null) {
+            players.remove(disconnectedPlayerId);
+            System.out.println("Player disconnected: " + disconnectedPlayerId);
             sendPlayerListToAll();
         }
 
@@ -168,30 +162,46 @@ public class WebSocketServer {
     private static String readWebSocketMessage(Socket socket) throws IOException {
         InputStream inputStream = socket.getInputStream();
         int firstByte = inputStream.read();
+    
         if (firstByte == -1) {
-            return null;
+            return null; // Connection closed
         }
-
+    
+        int opcode = firstByte & 0x0F;
+        if (opcode == 0x8) {
+            System.out.println("Received Close Frame. Client is disconnecting...");
+            return null; // Handle WebSocket close frame
+        }
+    
         int payloadLength = inputStream.read() & 0x7F;
         if (payloadLength == 126) {
             payloadLength = ((inputStream.read() & 0xFF) << 8) | (inputStream.read() & 0xFF);
         } else if (payloadLength == 127) {
             for (int i = 0; i < 6; i++) {
-                inputStream.read(); // Ignore leading bytes for simplicity
+                inputStream.read(); // Ignore leading bytes
             }
             payloadLength = ((inputStream.read() & 0xFF) << 8) | (inputStream.read() & 0xFF);
         }
-
+    
         byte[] mask = new byte[4];
-        inputStream.read(mask, 0, 4);
-
+        int maskRead = inputStream.read(mask, 0, 4);
+        if (maskRead < 4) {
+            return null; // Prevent crash if mask is incomplete
+        }
+    
         byte[] encodedMessage = new byte[payloadLength];
-        inputStream.read(encodedMessage, 0, payloadLength);
-
+        int bytesRead = inputStream.read(encodedMessage, 0, payloadLength);
+        if (bytesRead < payloadLength) {
+            return null; // Prevent crash if message is incomplete
+        }
+    
         for (int i = 0; i < payloadLength; i++) {
             encodedMessage[i] ^= mask[i % 4]; // Unmasking
         }
-
+    
         return new String(encodedMessage);
     }
+    
+
+
 }
