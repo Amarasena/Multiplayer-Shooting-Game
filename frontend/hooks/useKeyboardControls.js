@@ -1,17 +1,21 @@
-//frontend/hooks/useKeyboardControls.js
 "use client"
 
 import { useEffect, useState, useCallback } from "react"
 import { useWebSocket } from "./WebSocketProvider"
 
 export function useKeyboardControls(playerId) {
-  const [movement, setMovement] = useState({ forward: false, backward: false, left: false, right: false })
-  const [rotation, setRotation] = useState({ x: 0, y: 0 })
+  const [movement, setMovement] = useState({
+    forward: false,
+    backward: false,
+    left: false,
+    right: false,
+  })
+  const [rotation, setRotation] = useState({ yaw: 0, pitch: 0 })
   const socket = useWebSocket()
 
   const sendMovement = useCallback(
     (newMovement) => {
-      if (socket) {
+      if (socket && socket.readyState === WebSocket.OPEN) {
         socket.send(JSON.stringify({ type: "playerMovement", playerId, movement: newMovement }))
       }
     },
@@ -67,32 +71,15 @@ export function useKeyboardControls(playerId) {
       })
     }
 
-    const handleMouseMove = (event) => {
-      if (document.pointerLockElement) {
-        setRotation((prev) => {
-          const newRotation = {
-            x: Math.max(-Math.PI / 2, Math.min(Math.PI / 2, prev.x - event.movementY * 0.002)),
-            y: prev.y - event.movementX * 0.002,
-          }
-          if (socket) {
-            socket.send(JSON.stringify({ type: "playerRotation", playerId, rotation: newRotation }))
-          }
-          return newRotation
-        })
-      }
-    }
-
     window.addEventListener("keydown", handleKeyDown)
     window.addEventListener("keyup", handleKeyUp)
-    window.addEventListener("mousemove", handleMouseMove)
 
     return () => {
       window.removeEventListener("keydown", handleKeyDown)
       window.removeEventListener("keyup", handleKeyUp)
-      window.removeEventListener("mousemove", handleMouseMove)
     }
-  }, [socket, playerId, sendMovement])
+  }, [sendMovement])
 
-  return { movement, rotation }
+  return { movement, rotation, setRotation }
 }
 

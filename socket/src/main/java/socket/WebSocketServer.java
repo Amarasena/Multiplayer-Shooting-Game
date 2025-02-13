@@ -157,6 +157,7 @@ public class WebSocketServer {
         }
     }
 
+    // This is for generating the key
     private static String generateAcceptKey(String key) {
         try {
             String magicString = key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
