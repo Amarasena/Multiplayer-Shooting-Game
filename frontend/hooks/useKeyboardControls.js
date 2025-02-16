@@ -16,7 +16,17 @@ export function useKeyboardControls(playerId) {
   const sendMovement = useCallback(
     (newMovement) => {
       if (socket && socket.readyState === WebSocket.OPEN) {
-        socket.send(JSON.stringify({ type: "playerMovement", playerId, movement: newMovement }))
+        socket.send(
+          JSON.stringify(
+            {
+              type: "playerMovement",
+              playerId,
+              movement: newMovement,
+              playerMovement: movement,
+              rotation: rotation,
+            }
+          )
+        )
       }
     },
     [socket, playerId],

@@ -14,6 +14,9 @@ public class WebSocketServer {
     private static final int PORT = 9090;
     private static final Map<String, Socket> players = new ConcurrentHashMap<>();
     private static final Map<String, Map<String, Boolean>> playerMovements = new ConcurrentHashMap<>();
+    private static final Map<String, double[]> playerRotations = new ConcurrentHashMap<>();
+    private static final Map<String, double[]> playerPositions = new ConcurrentHashMap<>();
+
 
     public static void main(String[] args) {
         System.out.println("Socket is starting");
@@ -63,11 +66,18 @@ public class WebSocketServer {
 
             System.out.println("Handshake completed. WebSocket connection established!");
 
-            // Add the player
+            // Generate and store playerId
             String playerId = UUID.randomUUID().toString();
             players.put(playerId, clientSocket);
             playerMovements.put(playerId, new HashMap<>());
             System.out.println("New player joined: " + playerId);
+
+            // Send the assigned playerId to the client after handshake
+            JSONObject initMessage = new JSONObject();
+            initMessage.put("type", "init");
+            initMessage.put("playerId", playerId);
+            sendWebSocketMessage(outputStream, initMessage.toString());
+
             sendPlayerListToAll();
 
             // Keep listening for messages
@@ -87,29 +97,81 @@ public class WebSocketServer {
 
     private static void handlePlayerMovement(String message, String playerId) {
         JSONObject jsonMessage = new JSONObject(message);
+        
         if ("playerMovement".equals(jsonMessage.getString("type"))) {
-            // Extract movement as a JSONObject
-            JSONObject movementJson = jsonMessage.getJSONObject("movement");
-
-            // Convert the movement JSONObject to a Map<String, Boolean>
+            System.out.println("json msg : " + jsonMessage);
+    
+            // Extract the "playerMovement" object
+            JSONObject playerMovementJson = jsonMessage.getJSONObject("playerMovement");
+    
+            // Extract movement controls if present
             Map<String, Boolean> movement = new HashMap<>();
-            for (String key : movementJson.keySet()) {
-                movement.put(key, movementJson.getBoolean(key)); // Assuming movement values are booleans
+            if (playerMovementJson.has("movement")) {
+                JSONObject movementJson = playerMovementJson.getJSONObject("movement");
+                for (String key : movementJson.keySet()) {
+                    movement.put(key, movementJson.getBoolean(key));
+                }
+                // Update player movement information
+                playerMovements.get(playerId).putAll(movement);
             }
-
-            // Update player movement information
-            playerMovements.get(playerId).putAll(movement);
-
-            // Broadcast player movement to all clients
-            broadcastPlayerUpdate(playerId, playerMovements.get(playerId));
+    
+            // Extract rotation if present
+            if (playerMovementJson.has("rotation")) {
+                JSONObject rotationJson = playerMovementJson.getJSONObject("rotation");
+                double pitch = rotationJson.getDouble("pitch");
+                double yaw = rotationJson.getDouble("yaw");
+    
+                // Store rotation (assuming you have a rotation data structure)
+                playerRotations.put(playerId, new double[]{pitch, yaw});
+            }
+    
+            // Extract position if present
+            if (jsonMessage.has("position")) {
+                JSONArray positionArray = jsonMessage.getJSONArray("position");
+                double x = positionArray.getDouble(0);
+                double y = positionArray.getDouble(1);
+                double z = positionArray.getDouble(2);
+    
+                // Store player position
+                playerPositions.put(playerId, new double[]{x, y, z});
+            }
+    
+            // Broadcast updated movement, rotation, and position
+            broadcastPlayerUpdate(playerId, playerMovements.get(playerId), playerRotations.get(playerId), playerPositions.get(playerId));
         }
     }
+
+    private static void broadcastPlayerUpdate(String playerId, Map<String, Boolean> movement, double[] rotation, double[] position) {
+        JSONObject json = new JSONObject();
+        json.put("type", "playerUpdate");
+        json.put("playerId", playerId);
+        json.put("playerMovement", new JSONObject(movement));
+    
+        if (rotation != null) {
+            JSONObject rotationJson = new JSONObject();
+            rotationJson.put("pitch", rotation[0]);
+            rotationJson.put("yaw", rotation[1]);
+            json.put("rotation", rotationJson);
+        }
+    
+        if (position != null) {
+            JSONArray positionJson = new JSONArray();
+            positionJson.put(position[0]);
+            positionJson.put(position[1]);
+            positionJson.put(position[2]);
+            json.put("position", positionJson);
+        }
+    
+        broadcastMessage(json.toString());
+    }
+    
+    
 
     private static void broadcastPlayerUpdate(String playerId, Map<String, Boolean> movement) {
         JSONObject json = new JSONObject();
         json.put("type", "playerUpdate");
         json.put("playerId", playerId);
-        json.put("movement", new JSONObject(movement));
+        json.put("playerMovement", new JSONObject(movement));
 
         broadcastMessage(json.toString());
     }
