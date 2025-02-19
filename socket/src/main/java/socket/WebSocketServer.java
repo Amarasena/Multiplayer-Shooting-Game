@@ -87,7 +87,7 @@ public class WebSocketServer {
                     handleDisconnection(clientSocket);
                     break;
                 }
-                System.out.println("Received: " + message);
+                //System.out.println("Received: " + message);
                 handlePlayerMovement(message, playerId);
             }
         } catch (IOException e) {
@@ -99,7 +99,6 @@ public class WebSocketServer {
         JSONObject jsonMessage = new JSONObject(message);
         
         if ("playerMovement".equals(jsonMessage.getString("type"))) {
-            System.out.println("json msg : " + jsonMessage);
     
             // Extract the "playerMovement" object
             JSONObject playerMovementJson = jsonMessage.getJSONObject("playerMovement");
