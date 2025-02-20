@@ -23,6 +23,17 @@ public class WebSocketServer {
     private static final int MAX_THREADS = 10; // Adjust based on your needs
     private static final ExecutorService threadPool = Executors.newFixedThreadPool(MAX_THREADS);
 
+    private static final List<int[]> SPAWN_POINTS = Arrays.asList(
+            new int[] { -8, 0, -8 }, // Left back corner
+            new int[] { 8, 0, -8 }, // Right back corner
+            new int[] { -8, 0, 8 }, // Left front corner
+            new int[] { 8, 0, 8 }, // Right front corner
+            new int[] { 0, 0, -8 }, // Middle back
+            new int[] { 0, 0, 8 }, // Middle front
+            new int[] { -8, 0, 0 }, // Middle left
+            new int[] { 8, 0, 0 } // Middle right
+    );
+
     public static void main(String[] args) {
         System.out.println("Socket is starting");
         try (ServerSocket serverSocket = new ServerSocket(PORT)) {
@@ -37,7 +48,23 @@ public class WebSocketServer {
         } catch (IOException e) {
             e.printStackTrace();
         } finally {
-            threadPool.shutdown(); 
+            threadPool.shutdown();
+        }
+    }
+
+    private static void handlePlayerInit(Socket socket, String playerId) {
+        try {
+            int playerIndex = new ArrayList<>(players.keySet()).indexOf(playerId);
+            int[] spawnPoint = SPAWN_POINTS.get(playerIndex % SPAWN_POINTS.length);
+
+            JSONObject message = new JSONObject();
+            message.put("type", "playerSpawn");
+            message.put("playerId", playerId);
+            message.put("position", spawnPoint);
+
+            sendWebSocketMessage(socket.getOutputStream(), message.toString());
+        } catch (IOException e) {
+            e.printStackTrace();
         }
     }
 
@@ -175,7 +202,7 @@ public class WebSocketServer {
             e.printStackTrace();
         }
     }
-    
+
     private static void broadcastPlayerUpdate(String playerId, Map<String, Boolean> movement, double[] rotation,
             double[] position) {
         JSONObject json = new JSONObject();
