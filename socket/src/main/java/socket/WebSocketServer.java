@@ -6,9 +6,12 @@ import java.net.*;
 import java.security.MessageDigest;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 import org.json.JSONObject;
 import org.json.JSONArray;
+import org.json.JSONException;
 
 public class WebSocketServer {
     private static final int PORT = 9090;
@@ -17,6 +20,8 @@ public class WebSocketServer {
     private static final Map<String, double[]> playerRotations = new ConcurrentHashMap<>();
     private static final Map<String, double[]> playerPositions = new ConcurrentHashMap<>();
 
+    private static final int MAX_THREADS = 10; // Adjust based on your needs
+    private static final ExecutorService threadPool = Executors.newFixedThreadPool(MAX_THREADS);
 
     public static void main(String[] args) {
         System.out.println("Socket is starting");
@@ -27,10 +32,12 @@ public class WebSocketServer {
                 Socket clientSocket = serverSocket.accept();
                 System.out.println("Client connected: " + clientSocket.getInetAddress());
 
-                new Thread(() -> handleClient(clientSocket)).start();
+                threadPool.execute(() -> handleClient(clientSocket));
             }
         } catch (IOException e) {
             e.printStackTrace();
+        } finally {
+            threadPool.shutdown(); 
         }
     }
 
@@ -87,8 +94,15 @@ public class WebSocketServer {
                     handleDisconnection(clientSocket);
                     break;
                 }
-                //System.out.println("Received: " + message);
-                handlePlayerMovement(message, playerId);
+
+                JSONObject jsonMessage = new JSONObject(message);
+                String messageType = jsonMessage.getString("type");
+
+                if ("playerMovement".equals(messageType)) {
+                    handlePlayerMovement(message, playerId);
+                } else if ("playerShoot".equals(messageType)) {
+                    handlePlayerShoot(message, playerId);
+                }
             }
         } catch (IOException e) {
             handleDisconnection(clientSocket);
@@ -97,12 +111,12 @@ public class WebSocketServer {
 
     private static void handlePlayerMovement(String message, String playerId) {
         JSONObject jsonMessage = new JSONObject(message);
-        
+
         if ("playerMovement".equals(jsonMessage.getString("type"))) {
-    
+
             // Extract the "playerMovement" object
             JSONObject playerMovementJson = jsonMessage.getJSONObject("playerMovement");
-    
+
             // Extract movement controls if present
             Map<String, Boolean> movement = new HashMap<>();
             if (playerMovementJson.has("movement")) {
@@ -113,46 +127,76 @@ public class WebSocketServer {
                 // Update player movement information
                 playerMovements.get(playerId).putAll(movement);
             }
-    
+
             // Extract rotation if present
-            if (playerMovementJson.has("rotation")) {
-                JSONObject rotationJson = playerMovementJson.getJSONObject("rotation");
+            if (jsonMessage.has("rotation")) {
+                JSONObject rotationJson = jsonMessage.getJSONObject("rotation");
                 double pitch = rotationJson.getDouble("pitch");
                 double yaw = rotationJson.getDouble("yaw");
-    
+
                 // Store rotation (assuming you have a rotation data structure)
-                playerRotations.put(playerId, new double[]{pitch, yaw});
+                playerRotations.put(playerId, new double[] { pitch, yaw });
             }
-    
+
             // Extract position if present
-            if (jsonMessage.has("position")) {
-                JSONArray positionArray = jsonMessage.getJSONArray("position");
-                double x = positionArray.getDouble(0);
-                double y = positionArray.getDouble(1);
-                double z = positionArray.getDouble(2);
-    
-                // Store player position
-                playerPositions.put(playerId, new double[]{x, y, z});
+            if (jsonMessage.has("position") && !jsonMessage.isNull("position")) {
+                try {
+                    JSONArray positionArray = jsonMessage.getJSONArray("position");
+                    double x = positionArray.getDouble(0);
+                    double y = positionArray.getDouble(1);
+                    double z = positionArray.getDouble(2);
+
+                    // Store player position
+                    playerPositions.put(playerId, new double[] { x, y, z });
+                } catch (JSONException e) {
+                    System.out.println("Invalid position format received: " + e.getMessage());
+                    // Use last known position or default
+                    if (!playerPositions.containsKey(playerId)) {
+                        playerPositions.put(playerId, new double[] { 0, 0, 0 });
+                    }
+                }
             }
-    
+
             // Broadcast updated movement, rotation, and position
-            broadcastPlayerUpdate(playerId, playerMovements.get(playerId), playerRotations.get(playerId), playerPositions.get(playerId));
+            broadcastPlayerUpdate(playerId, playerMovements.get(playerId), playerRotations.get(playerId),
+                    playerPositions.get(playerId));
         }
     }
 
-    private static void broadcastPlayerUpdate(String playerId, Map<String, Boolean> movement, double[] rotation, double[] position) {
+    private static void handlePlayerShoot(String message, String playerId) {
+        JSONObject jsonMessage = new JSONObject(message);
+
+        if ("playerShoot".equals(jsonMessage.getString("type"))) {
+            // Extract shooting data
+            JSONArray positionArray = jsonMessage.getJSONArray("position");
+            JSONObject rotationJson = jsonMessage.getJSONObject("rotation");
+
+            // Create shoot event message
+            JSONObject shootEvent = new JSONObject();
+            shootEvent.put("type", "playerShoot");
+            shootEvent.put("playerId", playerId);
+            shootEvent.put("position", positionArray);
+            shootEvent.put("rotation", rotationJson);
+
+            // Broadcast shoot event to all clients
+            broadcastMessage(shootEvent.toString());
+        }
+    }
+
+    private static void broadcastPlayerUpdate(String playerId, Map<String, Boolean> movement, double[] rotation,
+            double[] position) {
         JSONObject json = new JSONObject();
         json.put("type", "playerUpdate");
         json.put("playerId", playerId);
         json.put("playerMovement", new JSONObject(movement));
-    
+
         if (rotation != null) {
             JSONObject rotationJson = new JSONObject();
             rotationJson.put("pitch", rotation[0]);
             rotationJson.put("yaw", rotation[1]);
             json.put("rotation", rotationJson);
         }
-    
+
         if (position != null) {
             JSONArray positionJson = new JSONArray();
             positionJson.put(position[0]);
@@ -160,11 +204,9 @@ public class WebSocketServer {
             positionJson.put(position[2]);
             json.put("position", positionJson);
         }
-    
+
         broadcastMessage(json.toString());
     }
-    
-    
 
     private static void broadcastPlayerUpdate(String playerId, Map<String, Boolean> movement) {
         JSONObject json = new JSONObject();
@@ -207,6 +249,8 @@ public class WebSocketServer {
         if (disconnectedPlayerId != null) {
             players.remove(disconnectedPlayerId);
             playerMovements.remove(disconnectedPlayerId);
+            playerRotations.remove(disconnectedPlayerId); // Add this line
+            playerPositions.remove(disconnectedPlayerId); // Add this line
             System.out.println("Player disconnected: " + disconnectedPlayerId);
             sendPlayerListToAll();
         }
