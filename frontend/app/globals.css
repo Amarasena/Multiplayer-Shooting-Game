@@ -19,3 +19,89 @@ body {
   background: var(--background);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.text-pulse {
+  animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+
+.health-bar {
+  position: absolute;
+  width: 100px;
+  height: 10px;
+  background: rgba(0, 0, 0, 0.5);
+  border: 1px solid #000;
+  border-radius: 5px;
+  overflow: hidden;
+}
+
+.health-bar-fill {
+  height: 100%;
+  background: #ff0000;
+  transition: width 0.2s ease;
+}
+
+.player-health {
+  position: fixed;
+  bottom: 20px;
+  left: 20px;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: white;
+  font-size: 18px;
+}
+
+.player-health-container {
+  position: fixed;
+  bottom: 30px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: rgba(0, 0, 0, 0.5);
+  padding: 10px 20px;
+  border-radius: 10px;
+  color: white;
+}
+
+.player-health-bar {
+  width: 200px;
+  height: 20px;
+  background: rgba(0, 0, 0, 0.3);
+  border: 2px solid #fff;
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.player-health-fill {
+  height: 100%;
+  background: linear-gradient(to right, #ff0000, #ff4444);
+  transition: width 0.3s ease;
+}
+
+.player-health-text {
+  font-size: 18px;
+  font-weight: bold;
+  min-width: 45px;
+  text-align: right;
+}
+
+
+.hit-effect {
+  animation: flash 0.1s ease-out;
+}
+
+@keyframes flash {
+  0% { opacity: 1; }
+  50% { opacity: 0.5; }
+  100% { opacity: 1; }
+}

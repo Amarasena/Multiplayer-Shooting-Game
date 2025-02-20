@@ -54,15 +54,23 @@ public class WebSocketServer {
 
     private static void handlePlayerInit(Socket socket, String playerId) {
         try {
+            // Get player index and calculate spawn point
             int playerIndex = new ArrayList<>(players.keySet()).indexOf(playerId);
             int[] spawnPoint = SPAWN_POINTS.get(playerIndex % SPAWN_POINTS.length);
 
+            // Store initial position
+            playerPositions.put(playerId, new double[] { spawnPoint[0], spawnPoint[1], spawnPoint[2] });
+
+            // Send init message with spawn position
             JSONObject message = new JSONObject();
-            message.put("type", "playerSpawn");
+            message.put("type", "init");
             message.put("playerId", playerId);
-            message.put("position", spawnPoint);
+            message.put("position", new JSONArray(spawnPoint));
 
             sendWebSocketMessage(socket.getOutputStream(), message.toString());
+
+            // Send updated player list to all clients
+            sendPlayerListToAll();
         } catch (IOException e) {
             e.printStackTrace();
         }
@@ -70,61 +78,71 @@ public class WebSocketServer {
 
     private static void handleClient(Socket clientSocket) {
         try (
-                BufferedReader reader = new BufferedReader(new InputStreamReader(clientSocket.getInputStream()));
-                OutputStream outputStream = clientSocket.getOutputStream()) {
+            BufferedReader reader = new BufferedReader(new InputStreamReader(clientSocket.getInputStream()));
+            OutputStream outputStream = clientSocket.getOutputStream()
+        ) {
             String webSocketKey = null;
             String line;
-
+    
             // Read the handshake request properly
             while ((line = reader.readLine()) != null && !line.isEmpty()) {
                 if (line.startsWith("Sec-WebSocket-Key: ")) {
                     webSocketKey = line.substring(19).trim();
                 }
             }
-
+    
             if (webSocketKey == null) {
                 System.out.println("Invalid WebSocket request. Closing connection.");
                 clientSocket.close();
                 return;
             }
-
-            // Respond with proper WebSocket handshake
-            String acceptKey = generateAcceptKey(webSocketKey);
-            String response = "HTTP/1.1 101 Switching Protocols\r\n" +
-                    "Upgrade: websocket\r\n" +
-                    "Connection: Upgrade\r\n" +
-                    "Sec-WebSocket-Accept: " + acceptKey + "\r\n\r\n";
-
-            outputStream.write(response.getBytes());
-            outputStream.flush();
-
-            System.out.println("Handshake completed. WebSocket connection established!");
-
+    
             // Generate and store playerId
             String playerId = UUID.randomUUID().toString();
             players.put(playerId, clientSocket);
             playerMovements.put(playerId, new HashMap<>());
+    
+            // Initialize player position with spawn point
+            int playerIndex = new ArrayList<>(players.keySet()).indexOf(playerId);
+            int[] spawnPoint = SPAWN_POINTS.get(playerIndex % SPAWN_POINTS.size());
+            playerPositions.put(playerId, new double[] { spawnPoint[0], spawnPoint[1], spawnPoint[2] });
+            playerRotations.put(playerId, new double[] { 0, 0 }); // Initialize rotation
+    
             System.out.println("New player joined: " + playerId);
-
-            // Send the assigned playerId to the client after handshake
+    
+            // Complete WebSocket handshake
+            String acceptKey = generateAcceptKey(webSocketKey);
+            String response = "HTTP/1.1 101 Switching Protocols\r\n" +
+                             "Upgrade: websocket\r\n" +
+                             "Connection: Upgrade\r\n" +
+                             "Sec-WebSocket-Accept: " + acceptKey + "\r\n\r\n";
+    
+            outputStream.write(response.getBytes());
+            outputStream.flush();
+    
+            System.out.println("Handshake completed. WebSocket connection established!");
+    
+            // Send init message to client
             JSONObject initMessage = new JSONObject();
             initMessage.put("type", "init");
             initMessage.put("playerId", playerId);
+            initMessage.put("position", new JSONArray(spawnPoint));
             sendWebSocketMessage(outputStream, initMessage.toString());
-
+    
+            // Send updated player list to all clients
             sendPlayerListToAll();
-
-            // Keep listening for messages
+    
+            // Handle incoming messages
             while (true) {
                 String message = readWebSocketMessage(clientSocket);
                 if (message == null) {
                     handleDisconnection(clientSocket);
                     break;
                 }
-
+    
                 JSONObject jsonMessage = new JSONObject(message);
                 String messageType = jsonMessage.getString("type");
-
+    
                 if ("playerMovement".equals(messageType)) {
                     handlePlayerMovement(message, playerId);
                 } else if ("playerShoot".equals(messageType)) {
@@ -132,6 +150,7 @@ public class WebSocketServer {
                 }
             }
         } catch (IOException e) {
+            e.printStackTrace();
             handleDisconnection(clientSocket);
         }
     }
@@ -203,6 +222,30 @@ public class WebSocketServer {
         }
     }
 
+    private static void handlePlayerHit(String message, String playerId) {
+        try {
+            JSONObject jsonMessage = new JSONObject(message);
+            String targetId = jsonMessage.getString("targetId");
+            String shooterId = jsonMessage.getString("shooterId");
+            int damage = jsonMessage.getInt("damage");
+            
+            // Validate hit
+            if (players.containsKey(targetId) && players.containsKey(shooterId)) {
+                // Create hit confirmation message
+                JSONObject broadcastMessage = new JSONObject();
+                broadcastMessage.put("type", "playerHit");
+                broadcastMessage.put("targetId", targetId);
+                broadcastMessage.put("shooterId", shooterId);
+                broadcastMessage.put("damage", damage);
+                
+                // Broadcast to all players
+                broadcastMessage(broadcastMessage.toString());
+            }
+        } catch (JSONException e) {
+            e.printStackTrace();
+        }
+    }
+
     private static void broadcastPlayerUpdate(String playerId, Map<String, Boolean> movement, double[] rotation,
             double[] position) {
         JSONObject json = new JSONObject();
@@ -248,7 +291,23 @@ public class WebSocketServer {
     }
 
     private static void sendPlayerListToAll() {
-        JSONArray playerArray = new JSONArray(players.keySet());
+        JSONArray playerArray = new JSONArray();
+
+        for (String pid : players.keySet()) {
+            JSONObject playerInfo = new JSONObject();
+            playerInfo.put("id", pid);
+
+            // Add null check for position
+            double[] position = playerPositions.get(pid);
+            if (position != null) {
+                playerInfo.put("position", new JSONArray(position));
+            } else {
+                // Provide default position if none exists
+                playerInfo.put("position", new JSONArray(new double[] { 0, 0, 0 }));
+            }
+
+            playerArray.put(playerInfo);
+        }
 
         JSONObject json = new JSONObject();
         json.put("type", "playerList");
@@ -360,5 +419,18 @@ public class WebSocketServer {
         }
 
         return new String(encodedMessage);
+    }
+
+    private static void handlePlayerHit(String message, String playerId) {
+        JSONObject jsonMessage = new JSONObject(message);
+        String targetId = jsonMessage.getString("targetId");
+        
+        // Broadcast the hit to all players
+        JSONObject broadcastMessage = new JSONObject();
+        broadcastMessage.put("type", "playerHit");
+        broadcastMessage.put("targetId", targetId);
+        broadcastMessage.put("shooterId", playerId);
+        
+        broadcastMessage(broadcastMessage.toString());
     }
 }

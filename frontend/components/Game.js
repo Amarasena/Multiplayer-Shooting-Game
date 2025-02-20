@@ -2,7 +2,7 @@
 "use client"
 
 import { Physics } from "@react-three/cannon"
-import { Box, PerspectiveCamera, Sky } from "@react-three/drei"
+import { Box, PerspectiveCamera, Sky, Html } from "@react-three/drei"
 import { Canvas, useFrame, useThree } from "@react-three/fiber"
 import { useEffect, useRef, useState, useCallback } from "react"
 import { Euler, Vector3 } from "three"
@@ -40,8 +40,22 @@ const updateBulletPosition = (bullet, delta) => {
 }
 
 const checkBulletCollision = (bulletPosition, playerPosition) => {
-  return bulletPosition.distanceTo(new Vector3(...playerPosition)) < 1
+  // Convert positions to Vector3 if they aren't already
+  const bulletPos = new Vector3(...bulletPosition)
+  const playerPos = new Vector3(...playerPosition)
+
+  // Use a collision box that matches the player model
+  const playerHeight = 2
+  const playerWidth = 1
+
+  // Check if bullet is within the player's bounding box
+  const dx = Math.abs(bulletPos.x - playerPos.x)
+  const dy = Math.abs(bulletPos.y - (playerPos.y + playerHeight / 2)) // Account for player height
+  const dz = Math.abs(bulletPos.z - playerPos.z)
+
+  return dx < playerWidth / 2 && dy < playerHeight / 2 && dz < playerWidth / 2
 }
+
 
 function Player({ isLocal, playerId, initialPosition, initialRotation, players, setPlayers }) {
   const meshRef = useRef()
@@ -60,6 +74,10 @@ function Player({ isLocal, playerId, initialPosition, initialRotation, players, 
   const [canShoot, setCanShoot] = useState(true)
   const SHOOT_COOLDOWN = 250
 
+  const [isHit, setIsHit] = useState(false)
+
+  
+
   // Consolidated shooting handler
   const handleShooting = useCallback(() => {
     if (!isLocal || !meshRef.current || !canShoot || socket?.readyState !== WebSocket.OPEN) return
@@ -69,7 +87,7 @@ function Player({ isLocal, playerId, initialPosition, initialRotation, players, 
     const bulletDirection = new Vector3(0, 0, -1).applyEuler(new Euler(0, rotation.yaw, 0)).normalize()
     bulletDirection.y -= 0.05 // Add slight downward trajectory
 
-    const bulletPosition = meshRef.current.position.clone().add(new Vector3(0, 1.2, 0))
+    const bulletPosition = meshRef.current.position.clone().add(new Vector3(0, 0.8, 0))
     const newBullet = createBullet(playerId, bulletPosition, bulletDirection)
 
     // Update local player's bullets
@@ -111,6 +129,12 @@ function Player({ isLocal, playerId, initialPosition, initialRotation, players, 
       handleShooting()
     }
   }, [isShooting, canShoot, isLocal, handleShooting])
+
+  useEffect(() => {
+    if (isHit) {
+      setTimeout(() => setIsHit(false), 100)
+    }
+  }, [isHit])
 
   // Mouse lock handling
   useEffect(() => {
@@ -184,20 +208,30 @@ function Player({ isLocal, playerId, initialPosition, initialRotation, players, 
             const newPosition = updateBulletPosition(bullet, delta)
 
             // Check collisions with other players
-            const hasCollided = players.some(
-              (target) => target.id !== bullet.playerId && checkBulletCollision(newPosition, target.position),
+            const hitPlayer = players.find(
+              (target) =>
+                target.id !== bullet.playerId && // Don't hit self
+                target.health > 0 && // Only hit alive players
+                checkBulletCollision(newPosition, target.position)
             )
 
-            if (hasCollided) {
+            if (hitPlayer) { // Changed from hasCollided to hitPlayer
               if (socket?.readyState === WebSocket.OPEN) {
                 socket.send(
                   JSON.stringify({
                     type: "playerHit",
                     shooterId: bullet.playerId,
-                    targetId: player.id,
+                    targetId: hitPlayer.id,
+                    damage: 20,
+                    position: newPosition.toArray() // Add hit position for effects
                   }),
                 )
               }
+              return null // Remove bullet after hit
+            }
+
+            // Check if bullet hit environment (optional)
+            if (checkEnvironmentCollision(newPosition)) {
               return null
             }
 
@@ -206,12 +240,25 @@ function Player({ isLocal, playerId, initialPosition, initialRotation, players, 
               position: newPosition.toArray(),
             }
           })
-          .filter(Boolean)
+          .filter(Boolean) // Remove null bullets (those that hit something)
 
         return { ...player, bullets: updatedBullets }
       }),
     )
   })
+
+  const checkEnvironmentCollision = (position) => {
+    // Check if bullet hits ground
+    if (position.y < 0) return true
+
+    // Check if bullet hits blocks
+    return BLOCK_POSITIONS.some(blockPos => {
+      const dx = Math.abs(position.x - blockPos[0])
+      const dy = Math.abs(position.y - blockPos[1])
+      const dz = Math.abs(position.z - blockPos[2])
+      return dx < 1 && dy < 1 && dz < 1
+    })
+  }
 
   // Update remote player position/rotation
   useEffect(() => {
@@ -223,8 +270,40 @@ function Player({ isLocal, playerId, initialPosition, initialRotation, players, 
 
   return (
     <>
-      <Box ref={meshRef} args={[1, 2, 1]} position={currentPosition.current} rotation={[0, rotation.yaw, 0]} castShadow>
-        <meshStandardMaterial color={isLocal ? "hotpink" : "blue"} />
+      <Box
+        ref={meshRef}
+        args={[1, 2, 1]}
+        position={currentPosition.current}
+        rotation={[0, rotation.yaw, 0]}
+        castShadow
+      >
+        <meshStandardMaterial
+          color={isLocal ? "hotpink" : "blue"}
+          emissive={isHit ? "#ff0000" : "#000000"}
+          emissiveIntensity={isHit ? 0.5 : 0}
+        />
+
+        {/* Floating health bar */}
+        {!isLocal && (
+          <Html
+            position={[0, 2.5, 0]}
+            center
+            style={{
+              width: '50px',
+              transform: 'scale(1.5)',
+            }}
+          >
+            <div className="health-bar">
+              <div
+                className="health-bar-fill"
+                style={{
+                  width: `${players.find(p => p.id === playerId)?.health || 0}%`,
+                  backgroundColor: players.find(p => p.id === playerId)?.health > 20 ? '#ff0000' : '#ff6b6b'
+                }}
+              />
+            </div>
+          </Html>
+        )}
       </Box>
 
       {/* Render bullets */}
@@ -250,30 +329,36 @@ function Player({ isLocal, playerId, initialPosition, initialRotation, players, 
   )
 }
 
-function Scene({ players, setPlayers }) {
+function Scene({ players, setPlayers, gameState }) {
   return (
     <>
       <PerspectiveCamera makeDefault position={[0, 3, 5]} />
       <ambientLight intensity={0.5} />
       <directionalLight position={[10, 10, 5]} intensity={1} castShadow />
       <Physics>
-        {players.map((player) => (
-          <Player
-            key={player.id}
-            isLocal={player.isLocal}
-            playerId={player.id}
-            initialPosition={player.position}
-            initialRotation={player.rotation}
-            players={players}
-            setPlayers={setPlayers}
-          />
-        ))}
+        {gameState === 'playing' && players.map((player) => {
+          if (!player?.id) {
+            console.warn('Player without valid ID:', player)
+            return null
+          }
+          return (
+            <Player
+              key={player.id.toString()}
+              isLocal={player.isLocal}
+              playerId={player.id}
+              initialPosition={player.position}
+              initialRotation={player.rotation}
+              players={players}
+              setPlayers={setPlayers}
+            />
+          )
+        })}
         <Ground />
         {BLOCK_POSITIONS.map((position, index) => (
-          <Block key={index} position={position} />
+          <Block key={`block-${index}`} position={position} />
         ))}
-        <Tree position={[-5, 0, -5]} />
-        <Tree position={[10, 0, -3]} />
+        <Tree position={[-5, 0, -5]} key="tree-1" />
+        <Tree position={[10, 0, -3]} key="tree-2" />
       </Physics>
       <Sky sunPosition={[100, 20, 100]} />
     </>
@@ -282,8 +367,27 @@ function Scene({ players, setPlayers }) {
 
 export default function Game() {
   const [players, setPlayers] = useState([])
+  const [gameState, setGameState] = useState('waiting') // 'waiting', 'countdown', 'playing'
+  const [countdown, setCountdown] = useState(5)
   const socket = useWebSocket()
   const localPlayerId = useRef(Math.random().toString(36).substr(2, 9))
+  const localPlayerPosition = useRef(null)
+
+  useEffect(() => {
+    if (gameState === 'countdown' && countdown > 0) {
+      const timer = setTimeout(() => {
+        setCountdown(prev => prev - 1)
+      }, 1000)
+
+      if (countdown === 1) {
+        setTimeout(() => {
+          setGameState('playing')
+        }, 1000)
+      }
+
+      return () => clearTimeout(timer)
+    }
+  }, [gameState, countdown])
 
   useEffect(() => {
     if (!socket) return
@@ -303,22 +407,42 @@ export default function Game() {
         case "init":
           if (message.playerId) {
             localPlayerId.current = message.playerId
+            if (message.position) {
+              localPlayerPosition.current = message.position
+            }
           }
           break
 
         case "playerList":
           if (Array.isArray(message.players)) {
             setPlayers(
-              message.players.map((player, index) => ({
-                id: player,
-                isLocal: player === localPlayerId.current,
+              message.players.map(player => ({
+                id: typeof player === 'object' ? player.id : player, // Handle both object and string cases
+                isLocal: (typeof player === 'object' ? player.id : player) === localPlayerId.current,
                 rotation: { yaw: 0, pitch: 0 },
-                // Assign spawn point based on player index, wrap around if more players than spawn points
-                position: SPAWN_POINTS[index % SPAWN_POINTS.length],
+                position: typeof player === 'object' ? player.position : [0, 0, 0],
                 isShooting: false,
                 bullets: [],
-              })),
+                health: 100,
+              }))
             )
+
+            if (message.players.length >= 2 && gameState === 'waiting') {
+              setGameState('countdown')
+              setCountdown(5)
+            }
+          }
+          break;
+
+        case "playerHit":
+          if (message.targetId) {
+            setPlayers(prev =>
+              prev.map(player =>
+                player.id === message.targetId
+                  ? { ...player, health: Math.max(0, player.health - 20) } // Decrease health by 20
+                  : player
+              )
+            );
           }
           break;
 
@@ -369,6 +493,54 @@ export default function Game() {
             }, 100)
           }
           break
+
+        case "playerHit":
+          if (message.targetId) {
+            setPlayers(prev =>
+              prev.map(player =>
+                player.id === message.targetId
+                  ? {
+                    ...player,
+                    health: Math.max(0, player.health - (message.damage || 20)), // Default to 20 if damage not specified
+                    isHit: true // Trigger hit effect
+                  }
+                  : player
+              )
+            )
+
+            // Add death check
+            const hitPlayer = players.find(p => p.id === message.targetId)
+            if (hitPlayer && hitPlayer.health <= 20) { // Check if this hit would kill the player
+              // Handle player death
+              socket.send(JSON.stringify({
+                type: "playerDeath",
+                playerId: message.targetId,
+                killerId: message.shooterId
+              }))
+            }
+          }
+          break;
+
+        case "playerDeath":
+          if (message.playerId) {
+            setPlayers(prev =>
+              prev.map(player =>
+                player.id === message.playerId
+                  ? {
+                    ...player,
+                    health: 0,
+                    isDead: true
+                  }
+                  : player
+              )
+            )
+
+            // If local player died, show death screen
+            if (message.playerId === localPlayerId.current) {
+              setGameState('dead')
+            }
+          }
+          break;
       }
     }
 
@@ -384,9 +556,59 @@ export default function Game() {
   }, [socket])
 
   return (
-    <div className="w-full h-screen">
+    <div className="w-full h-screen relative">
+      {/* Game state overlays */}
+      {gameState === 'waiting' && (
+        <div className="absolute inset-0 flex items-center justify-center bg-black bg-opacity-50 z-10">
+          <div className="text-white text-center">
+            <h1 className="text-4xl mb-4">Waiting for players...</h1>
+            <p className="text-xl">Players connected: {players.length}/2</p>
+          </div>
+        </div>
+      )}
+
+      {gameState === 'countdown' && (
+        <div className="absolute inset-0 flex items-center justify-center bg-black bg-opacity-50 z-10">
+          <div className="text-white text-center">
+            <h1 className="text-8xl mb-4">{countdown}</h1>
+            <p className="text-2xl">Get ready!</p>
+          </div>
+        </div>
+      )}
+
+      {gameState === 'playing' && (
+        <div className="player-health-container">
+          <span className="player-health-text">HP:</span>
+          <div className="player-health-bar">
+            <div
+              className="player-health-fill"
+              style={{
+                width: `${players.find(p => p.isLocal)?.health || 0}%`,
+                opacity: players.find(p => p.isLocal)?.health > 20 ? 1 : 0.7
+              }}
+            />
+          </div>
+          <span className="player-health-text">
+            {players.find(p => p.isLocal)?.health || 0}
+          </span>
+        </div>
+      )}
+
+      {gameState === 'dead' && (
+        <div className="absolute inset-0 flex items-center justify-center bg-red-900 bg-opacity-50 z-10">
+          <div className="text-white text-center">
+            <h1 className="text-6xl mb-4">You Died!</h1>
+            <p className="text-2xl">Press R to respawn</p>
+          </div>
+        </div>
+      )}
+
       <Canvas shadows>
-        <Scene players={players} setPlayers={setPlayers} />
+        <Scene
+          players={players}
+          setPlayers={setPlayers}
+          gameState={gameState}
+        />
       </Canvas>
     </div>
   )
