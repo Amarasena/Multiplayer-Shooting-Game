@@ -1,7 +1,8 @@
+import { useLoader } from "@react-three/fiber";
 import { useEffect, useRef, useState } from "react";
-import { Box } from "@react-three/drei";
-import { useKeyboardControls } from "../hooks/useKeyboardControls";
 import { Vector3 } from "three";
+import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader";
+import { useKeyboardControls } from "../hooks/useKeyboardControls";
 
 // WebSocket connection
 const socket = new WebSocket("ws://192.168.56.1:12345"); // Replace with your server's IP
@@ -10,6 +11,7 @@ function Player({ playerId, isLocal }) {
   const meshRef = useRef();
   const { forward, backward, left, right } = useKeyboardControls();
   const [position, setPosition] = useState(new Vector3(0, 1, 0));
+  const { scene } = useLoader(GLTFLoader, "/models/character.gltf"); // Adjust the path as necessary
 
   useEffect(() => {
     if (!isLocal) {
@@ -35,7 +37,9 @@ function Player({ playerId, isLocal }) {
         setPosition(newPos);
 
         // Send position update to server
-        socket.send(JSON.stringify({ playerId, x: newPos.x, y: newPos.y, z: newPos.z }));
+        socket.send(
+          JSON.stringify({ playerId, x: newPos.x, y: newPos.y, z: newPos.z })
+        );
       };
 
       const interval = setInterval(movePlayer, 100);
@@ -43,11 +47,7 @@ function Player({ playerId, isLocal }) {
     }
   }, [forward, backward, left, right, position, isLocal]);
 
-  return (
-    <Box ref={meshRef} args={[1, 2, 1]} position={position.toArray()} castShadow>
-      <meshStandardMaterial color={isLocal ? "hotpink" : "blue"} />
-    </Box>
-  );
+  return <primitive object={scene} position={position.toArray()} />;
 }
 
 export default function Players() {

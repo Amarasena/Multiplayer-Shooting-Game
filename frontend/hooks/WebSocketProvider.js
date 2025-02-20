@@ -1,7 +1,7 @@
 //frontend/hooks/WebSocketProvider.js
-"use client"
+"use client";
 
-import React, { createContext, useContext, useEffect, useState } from "react";
+import { createContext, useContext, useEffect, useState } from "react";
 import webSocketManager from "./webSocketManager";
 
 const WebSocketContext = createContext(null);
@@ -10,7 +10,7 @@ export const WebSocketProvider = ({ children }) => {
   const [socket, setSocket] = useState(null);
 
   useEffect(() => {
-    webSocketManager.connect("ws://192.168.224.206:9090");
+    webSocketManager.connect("ws://192.168.27.122:9090");
     const ws = webSocketManager.getSocket();
     setSocket(ws);
 
