@@ -164,25 +164,18 @@ public class WebSocketServer {
     }
 
     private static void handlePlayerShoot(String message, String playerId) {
-        JSONObject jsonMessage = new JSONObject(message);
-
-        if ("playerShoot".equals(jsonMessage.getString("type"))) {
-            // Extract shooting data
-            JSONArray positionArray = jsonMessage.getJSONArray("position");
-            JSONObject rotationJson = jsonMessage.getJSONObject("rotation");
-
-            // Create shoot event message
-            JSONObject shootEvent = new JSONObject();
-            shootEvent.put("type", "playerShoot");
-            shootEvent.put("playerId", playerId);
-            shootEvent.put("position", positionArray);
-            shootEvent.put("rotation", rotationJson);
-
-            // Broadcast shoot event to all clients
-            broadcastMessage(shootEvent.toString());
+        try {
+            // Forward the shoot message to all other players
+            for (Map.Entry<String, Socket> entry : players.entrySet()) {
+                if (!entry.getKey().equals(playerId)) {
+                    sendWebSocketMessage(entry.getValue().getOutputStream(), message);
+                }
+            }
+        } catch (IOException e) {
+            e.printStackTrace();
         }
     }
-
+    
     private static void broadcastPlayerUpdate(String playerId, Map<String, Boolean> movement, double[] rotation,
             double[] position) {
         JSONObject json = new JSONObject();

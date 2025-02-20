@@ -11,8 +11,9 @@ import { useWebSocket } from "../hooks/WebSocketProvider"
 import Block, { BLOCK_POSITIONS } from "./map/Block"
 import { checkBoundary, Ground } from "./map/Ground"
 import { Tree } from "./map/Tree"
+import { useCallback } from "react"
 
-function Player({ isLocal, playerId, initialPosition, initialRotation, players }) {
+function Player({ isLocal, playerId, initialPosition, initialRotation, players, setPlayers }) {
   const meshRef = useRef()
   const position = meshRef.current?.position?.toArray() || [0, 0, 0]
   const { camera, gl } = useThree()
@@ -26,49 +27,72 @@ function Player({ isLocal, playerId, initialPosition, initialRotation, players }
 
   const [bullets, setBullets] = useState([])
 
-  const handleShooting = () => {
-    if (isLocal && meshRef.current && socket?.readyState === WebSocket.OPEN) {
-      const bulletSpeed = 50
-      const bulletDirection = new Vector3(0, 0, -1)
-        .applyEuler(new Euler(0, rotation.yaw, 0))
-        .normalize()
+  const [canShoot, setCanShoot] = useState(true)
+  const SHOOT_COOLDOWN = 250 // milliseconds between shots
 
-      const bulletPosition = meshRef.current.position.clone()
-        .add(new Vector3(0, 1, 0))
-
-      const newBullet = {
-        id: Date.now(),
-        position: bulletPosition,
-        direction: bulletDirection,
-        speed: bulletSpeed,
-        playerId // Add player ID to track who shot
-      }
-
-      // Add bullet locally
-      setBullets(prev => [...prev, newBullet])
-
-      // Send bullet data to server
-      socket.send(JSON.stringify({
-        type: "playerShoot",
-        playerId,
-        bulletData: newBullet,
-        position: meshRef.current.position.toArray(),
-        rotation: rotation
-      }))
-
-      // Remove bullet after 2 seconds
-      setTimeout(() => {
-        setBullets(prev => prev.filter(bullet => bullet.id !== newBullet.id))
-      }, 2000)
+  const handleShooting = useCallback(() => {
+    if (!isLocal || !meshRef.current || !canShoot || socket?.readyState !== WebSocket.OPEN) {
+      return;
     }
-  }
 
-  // Add bullet effect to shooting
+    setCanShoot(false);
+
+    const bulletSpeed = 50;
+    const bulletDirection = new Vector3(0, 0, -1)
+      .applyEuler(new Euler(0, rotation.yaw, 0))
+      .normalize();
+
+    const bulletPosition = meshRef.current.position.clone()
+      .add(new Vector3(0, 1.2, 0));
+
+    bulletDirection.y -= 0.05;
+
+    const newBullet = {
+      id: `${playerId}-${Date.now()}`, // More unique ID
+      position: bulletPosition.toArray(),
+      direction: bulletDirection.toArray(),
+      speed: bulletSpeed,
+      playerId,
+      timestamp: Date.now()
+    };
+
+    // Update local bullets immediately
+    setBullets(prev => [...prev, newBullet]);
+
+    // Send to server
+    socket.send(JSON.stringify({
+      type: "playerShoot",
+      playerId,
+      bulletData: newBullet,
+      position: meshRef.current.position.toArray(),
+      rotation
+    }));
+
+    // Clean up after 2 seconds
+    setTimeout(() => {
+      setBullets(prev => prev.filter(b => b.id !== newBullet.id));
+    }, 2000);
+
+    // Reset cooldown
+    setTimeout(() => {
+      setCanShoot(true);
+    }, SHOOT_COOLDOWN);
+  }, [isLocal, canShoot, socket, playerId, rotation, meshRef]);
+
+  // Update shooting effect hook
   useEffect(() => {
-    if (isShooting) {
+    if (isShooting && canShoot && isLocal) {
+      handleShooting();
+    }
+  }, [isShooting, canShoot, isLocal, handleShooting]);
+
+
+  // Update the shooting effect hook
+  useEffect(() => {
+    if (isShooting && canShoot) {
       handleShooting()
     }
-  }, [isShooting])
+  }, [isShooting, canShoot]) // Add canShoot to dependencies
 
 
 
@@ -109,7 +133,55 @@ function Player({ isLocal, playerId, initialPosition, initialRotation, players }
   useFrame((state, delta) => {
     if (!meshRef.current) return;
 
+    const allBullets = [
+      ...bullets,
+      ...(players.find(p => p.id === playerId)?.bullets || [])
+    ];
+
+    // Update all bullets positions (both local and remote)
+    const updatedBullets = allBullets.map(bullet => {
+      if (!bullet?.position || !bullet?.direction) return null;
+
+      // Convert array position and direction to Vector3
+      const bulletPos = Array.isArray(bullet.position)
+        ? new Vector3(...bullet.position)
+        : new Vector3(bullet.position[0], bullet.position[1], bullet.position[2]);
+
+      const bulletDir = Array.isArray(bullet.direction)
+        ? new Vector3(...bullet.direction)
+        : new Vector3(bullet.direction[0], bullet.direction[1], bullet.direction[2]);
+
+      // Calculate new position using initial direction
+      const newPosition = bulletPos.clone().add(
+        bulletDir.normalize().multiplyScalar(bullet.speed * delta)
+      );
+
+      // Check collisions with other players
+      for (const player of players) {
+        if (player.id !== bullet.playerId) {
+          const playerPos = new Vector3(...player.position);
+          if (newPosition.distanceTo(playerPos) < 1) {
+            if (socket?.readyState === WebSocket.OPEN) {
+              socket.send(JSON.stringify({
+                type: "playerHit",
+                shooterId: bullet.playerId,
+                targetId: player.id
+              }));
+            }
+            return null;
+          }
+        }
+      }
+
+      return {
+        ...bullet,
+        position: newPosition.toArray()
+      };
+    }).filter(Boolean);
+
     if (isLocal) {
+
+      setBullets(updatedBullets.filter(b => b.playerId === playerId));
 
       meshRef.current.rotation.set(0, rotation.yaw, 0)
 
@@ -135,36 +207,47 @@ function Player({ isLocal, playerId, initialPosition, initialRotation, players }
       meshRef.current.rotation.set(0, rotation.yaw, 0)
 
       // Update and check bullet collisions
-  setBullets(prev =>
-    prev.map(bullet => {
-      const newPosition = bullet.position.clone().add(
-        bullet.direction.clone().multiplyScalar(bullet.speed * delta)
-      )
+      setBullets(prev =>
+        prev.map(bullet => {
+          if (!bullet?.position || !bullet?.direction) return null;
 
-      // Check collisions with other players
-      players.forEach(player => {
-        if (player.id !== bullet.playerId) { // Don't collide with shooter
-          const playerPos = new Vector3(...player.position)
-          if (newPosition.distanceTo(playerPos) < 1) {
-            // Hit detected! Send hit event to server
-            if (socket?.readyState === WebSocket.OPEN) {
-              socket.send(JSON.stringify({
-                type: "playerHit",
-                shooterId: bullet.playerId,
-                targetId: player.id
-              }))
+          // Convert array position and direction to Vector3
+          const bulletPos = Array.isArray(bullet.position)
+            ? new Vector3(...bullet.position)
+            : new Vector3(bullet.position[0], bullet.position[1], bullet.position[2]);
+
+          const bulletDir = Array.isArray(bullet.direction)
+            ? new Vector3(...bullet.direction)
+            : new Vector3(bullet.direction[0], bullet.direction[1], bullet.direction[2]);
+
+          // Calculate new position using initial direction
+          const newPosition = bulletPos.clone().add(
+            bulletDir.normalize().multiplyScalar(bullet.speed * delta)
+          );
+
+          // Check collisions with other players
+          for (const player of players) {
+            if (player.id !== bullet.playerId) {
+              const playerPos = new Vector3(...player.position);
+              if (newPosition.distanceTo(playerPos) < 1) {
+                if (socket?.readyState === WebSocket.OPEN) {
+                  socket.send(JSON.stringify({
+                    type: "playerHit",
+                    shooterId: bullet.playerId,
+                    targetId: player.id
+                  }));
+                }
+                return null;
+              }
             }
-            return null // Remove bullet
           }
-        }
-      })
 
-      return {
-        ...bullet,
-        position: newPosition
-      }
-    }).filter(Boolean) // Remove null entries (bullets that hit)
-  )
+          return {
+            ...bullet,
+            position: newPosition.toArray()
+          };
+        }).filter(Boolean)
+      );
 
       // PUBG-style third-person camera setup
       const cameraDistance = 5    // Distance from player
@@ -201,6 +284,18 @@ function Player({ isLocal, playerId, initialPosition, initialRotation, players }
         }))
       }
     } else {
+
+      setPlayers(prev =>
+        prev.map(p =>
+          p.id === playerId
+            ? {
+              ...p,
+              bullets: updatedBullets.filter(b => b.playerId === playerId)
+            }
+            : p
+        )
+      );
+
       // Remote player movement with interpolation
       const INTERPOLATION_FACTOR = 0.2
       if (targetPosition.current) {
@@ -245,21 +340,25 @@ function Player({ isLocal, playerId, initialPosition, initialRotation, players }
       </Box>
 
       {/* Add bullet rendering */}
-      {bullets.map(bullet => (
-        <mesh
-          key={bullet.id}
-          position={[
-            bullet.position.x,
-            bullet.position.y,
-            bullet.position.z
-          ]}
-        >
-          <sphereGeometry args={[0.1]} />
-          <meshStandardMaterial color="yellow" emissive="orange" />
-        </mesh>
-      ))}
+      {[...bullets, ...(players.find(p => p.id === playerId)?.bullets || [])].map(bullet => {
+        if (!bullet?.position) return null
 
-      {/* Existing muzzle flash */}
+        const bulletPosition = Array.isArray(bullet.position)
+          ? bullet.position
+          : [bullet.position.x, bullet.position.y, bullet.position.z]
+
+        return (
+          <mesh
+            key={bullet.id}
+            position={bulletPosition}
+          >
+            <sphereGeometry args={[0.1]} />
+            <meshStandardMaterial color="yellow" emissive="orange" />
+          </mesh>
+        )
+      })}
+
+
       {isShooting && (
         <pointLight
           position={[
@@ -276,7 +375,7 @@ function Player({ isLocal, playerId, initialPosition, initialRotation, players }
   )
 }
 
-function Scene({ players }) {
+function Scene({ players, setPlayers }) {
   return (
     <>
       <PerspectiveCamera makeDefault position={[0, 3, 5]} />
@@ -291,6 +390,7 @@ function Scene({ players }) {
             initialPosition={player.position}
             initialRotation={player.rotation}
             players={players}
+            setPlayers={setPlayers}
           />
         ))}
         <Ground />
@@ -314,50 +414,116 @@ export default function Game() {
     if (!socket) return;
 
     const handleMessage = (event) => {
-      const message = JSON.parse(event.data);
-      console.log("Received from server:", message);
+      let message;
+      try {
+        message = JSON.parse(event.data);
+        console.log("Received from server:", message);
+      } catch (error) {
+        console.error("Failed to parse message:", error);
+        return;
+      }
 
-      if (message.type === "init") {
-        // Update the local player ID with the one assigned by the server
-        localPlayerId.current = message.playerId;
-        console.log("Local player ID updated:", localPlayerId.current);
-      } else if (message.type === "playerList") {
-        setPlayers((prevPlayers) => {
-          console.log("Previous players:", prevPlayers);  // Shows previous players state before updating
-          const updatedPlayers = message.players.map((player) => ({
-            id: player,
-            isLocal: player === localPlayerId.current,
-            rotation: { yaw: 0, pitch: 0 }, // Add initial rotation
-            position: [0, 0, 0] // Initial position
-          }));
-          console.log("Updated players:", updatedPlayers); // Shows updated players state
-          return updatedPlayers;
-        });
-      } else if (message.type === "playerUpdate") {
-        setPlayers((prevPlayers) =>
-          prevPlayers.map((player) =>
-            player.id === message.playerId
-              ? {
-                ...player,
-                position: message.position,
-                rotation: message.rotation || player.rotation, // Preserve existing rotation if not provided
-              }
-              : player,
-          ),
-        );
-      } else if (message.type === "playerShoot") {
-        setPlayers(prevPlayers =>
-          prevPlayers.map(player =>
-            player.id === message.playerId
-              ? {
-                ...player,
-                isShooting: true,
-                position: message.position,
-                rotation: message.rotation
-              }
-              : player
-          )
-        );
+      if (!message || !message.type) {
+        console.error("Invalid message format:", message);
+        return;
+      }
+
+      switch (message.type) {
+        case "init":
+          if (message.playerId) {
+            localPlayerId.current = message.playerId;
+            console.log("Local player ID updated:", localPlayerId.current);
+          }
+          break;
+
+        case "playerList":
+          if (Array.isArray(message.players)) {
+            setPlayers(prevPlayers => {
+              const updatedPlayers = message.players.map(player => ({
+                id: player,
+                isLocal: player === localPlayerId.current,
+                rotation: { yaw: 0, pitch: 0 },
+                position: [0, 0, 0],
+                isShooting: false,
+                bullets: []
+              }));
+              return updatedPlayers;
+            });
+          }
+          break;
+
+        case "playerUpdate":
+        case "playerMovement":
+          if (message.playerId) {
+            setPlayers(prevPlayers =>
+              prevPlayers.map(player => {
+                if (player.id !== message.playerId) return player;
+
+                return {
+                  ...player,
+                  position: message.position || player.position,
+                  rotation: message.rotation || player.rotation
+                };
+              })
+            );
+          }
+          break;
+
+        case "playerShoot":
+          if (message.playerId && message.bulletData) {
+            const bulletData = message.bulletData;
+
+            setPlayers(prevPlayers =>
+              prevPlayers.map(player => {
+                if (player.id !== message.playerId) return player;
+
+                // Filter out any existing bullets with the same ID
+                const existingBullets = player.bullets?.filter(b => b.id !== bulletData.id) || [];
+
+                const newBullet = {
+                  ...bulletData,
+                  timestamp: Date.now()
+                };
+
+                // Remove bullet after 2 seconds
+                setTimeout(() => {
+                  setPlayers(prev =>
+                    prev.map(p =>
+                      p.id === player.id
+                        ? {
+                          ...p,
+                          bullets: (p.bullets || []).filter(b => b.id !== newBullet.id)
+                        }
+                        : p
+                    )
+                  );
+                }, 2000);
+
+                return {
+                  ...player,
+                  isShooting: true,
+                  position: message.position || player.position,
+                  rotation: message.rotation || player.rotation,
+                  bullets: [...existingBullets, newBullet]
+                };
+              })
+            );
+
+            // Reset shooting state after short delay
+            setTimeout(() => {
+              setPlayers(prev =>
+                prev.map(player =>
+                  player.id === message.playerId
+                    ? { ...player, isShooting: false }
+                    : player
+                )
+              );
+            }, 100);
+          }
+          break;
+
+        default:
+          console.log("Unknown message type:", message.type);
       }
     };
 
@@ -372,12 +538,12 @@ export default function Game() {
       socket.removeEventListener("message", handleMessage);
       socket.removeEventListener("open", () => { });
     };
-  }, [socket]);  // Make sure to add socket in the dependency array
+  }, [socket]);
 
   return (
     <div className="w-full h-screen">
       <Canvas shadows>
-        <Scene players={players} />
+        <Scene players={players} setPlayers={setPlayers} />
       </Canvas>
     </div>
   )
