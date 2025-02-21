@@ -53,7 +53,19 @@ const checkBulletCollision = (bulletPosition, playerPosition) => {
   const dy = Math.abs(bulletPos.y - (playerPos.y + playerHeight / 2)) // Account for player height
   const dz = Math.abs(bulletPos.z - playerPos.z)
 
-  return dx < playerWidth / 2 && dy < playerHeight / 2 && dz < playerWidth / 2
+  const isColliding = dx < playerWidth / 2 && dy < playerHeight / 2 && dz < playerWidth / 2
+
+  if (isColliding) {
+    console.log('Bullet collision detected:', {
+      bulletPosition: bulletPos,
+      playerPosition: playerPos,
+      dx,
+      dy,
+      dz
+    })
+  }
+
+  return isColliding
 }
 
 
@@ -76,7 +88,7 @@ function Player({ isLocal, playerId, initialPosition, initialRotation, players, 
 
   const [isHit, setIsHit] = useState(false)
 
-  
+
 
   // Consolidated shooting handler
   const handleShooting = useCallback(() => {
@@ -216,6 +228,14 @@ function Player({ isLocal, playerId, initialPosition, initialRotation, players, 
             )
 
             if (hitPlayer) { // Changed from hasCollided to hitPlayer
+
+              console.log('Hit player:', {
+                shooter: bullet.playerId,
+                target: hitPlayer.id,
+                damage: 20,
+                targetCurrentHealth: hitPlayer.health
+              });
+
               if (socket?.readyState === WebSocket.OPEN) {
                 socket.send(
                   JSON.stringify({
@@ -227,6 +247,19 @@ function Player({ isLocal, playerId, initialPosition, initialRotation, players, 
                   }),
                 )
               }
+
+              setPlayers(currentPlayers => 
+                currentPlayers.map(p => 
+                  p.id === hitPlayer.id
+                    ? {
+                        ...p,
+                        health: Math.max(0, p.health - 20),
+                        isHit: true
+                      }
+                    : p
+                )
+              )
+              
               return null // Remove bullet after hit
             }
 
@@ -613,4 +646,3 @@ export default function Game() {
     </div>
   )
 }
-
