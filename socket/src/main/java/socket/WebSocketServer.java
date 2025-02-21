@@ -420,17 +420,4 @@ public class WebSocketServer {
 
         return new String(encodedMessage);
     }
-
-    private static void handlePlayerHit(String message, String playerId) {
-        JSONObject jsonMessage = new JSONObject(message);
-        String targetId = jsonMessage.getString("targetId");
-        
-        // Broadcast the hit to all players
-        JSONObject broadcastMessage = new JSONObject();
-        broadcastMessage.put("type", "playerHit");
-        broadcastMessage.put("targetId", targetId);
-        broadcastMessage.put("shooterId", playerId);
-        
-        broadcastMessage(broadcastMessage.toString());
-    }
 }
