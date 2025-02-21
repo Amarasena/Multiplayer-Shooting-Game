@@ -88,6 +88,10 @@ function Player({ isLocal, playerId, initialPosition, initialRotation, players, 
 
   const [isHit, setIsHit] = useState(false)
 
+  const [isDying, setIsDying] = useState(false)
+  const deathRotation = useRef(0)
+  const fallSpeed = useRef(0)
+
 
 
   // Consolidated shooting handler
@@ -160,6 +164,32 @@ function Player({ isLocal, playerId, initialPosition, initialRotation, players, 
   // Main game loop
   useFrame((state, delta) => {
     if (!meshRef.current) return
+
+    // Handle death animation
+    const player = players.find(p => p.id === playerId)
+    if (player?.health <= 0 && !isDying) {
+      setIsDying(true)
+      fallSpeed.current = 0
+    }
+
+    if (isDying) {
+      // Rotate and fall
+      deathRotation.current += delta * 5 // Rotation speed
+      fallSpeed.current += delta * 9.8 // Gravity
+
+      meshRef.current.rotation.z = deathRotation.current
+      meshRef.current.position.y = Math.max(0, meshRef.current.position.y - fallSpeed.current * delta)
+
+      // Log death animation
+      console.log('Death animation:', {
+        playerId,
+        rotation: deathRotation.current,
+        height: meshRef.current.position.y,
+        fallSpeed: fallSpeed.current
+      })
+
+      return // Skip regular movement updates when dying
+    }
 
     if (isLocal) {
       // Local player movement
@@ -248,18 +278,18 @@ function Player({ isLocal, playerId, initialPosition, initialRotation, players, 
                 )
               }
 
-              setPlayers(currentPlayers => 
-                currentPlayers.map(p => 
+              setPlayers(currentPlayers =>
+                currentPlayers.map(p =>
                   p.id === hitPlayer.id
                     ? {
-                        ...p,
-                        health: Math.max(0, p.health - 20),
-                        isHit: true
-                      }
+                      ...p,
+                      health: Math.max(0, p.health - 20),
+                      isHit: true
+                    }
                     : p
                 )
               )
-              
+
               return null // Remove bullet after hit
             }
 
@@ -314,6 +344,8 @@ function Player({ isLocal, playerId, initialPosition, initialRotation, players, 
           color={isLocal ? "hotpink" : "blue"}
           emissive={isHit ? "#ff0000" : "#000000"}
           emissiveIntensity={isHit ? 0.5 : 0}
+          opacity={isDying ? 0.5 : 1}
+          transparent={isDying}
         />
 
         {/* Floating health bar */}
