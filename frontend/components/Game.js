@@ -69,7 +69,7 @@ const checkBulletCollision = (bulletPosition, playerPosition) => {
 }
 
 
-function Player({ isLocal, playerId, initialPosition, initialRotation, players, setPlayers }) {
+function Player({ isLocal, playerId, initialPosition, initialRotation, players, setPlayers, setGameState }) {
   const meshRef = useRef()
   const { camera, gl } = useThree()
   const { movement, rotation, setRotation, isShooting } = useKeyboardControls(
@@ -429,6 +429,7 @@ function Scene({ players, setPlayers, gameState }) {
               initialRotation={player.rotation}
               players={players}
               setPlayers={setPlayers}
+              setGameState={setGameState}
             />
           )
         })}
@@ -687,6 +688,7 @@ export default function Game() {
           players={players}
           setPlayers={setPlayers}
           gameState={gameState}
+          setGameState={setGameState}
         />
       </Canvas>
     </div>
