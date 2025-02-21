@@ -408,7 +408,7 @@ function Player({ isLocal, playerId, initialPosition, initialRotation, players, 
   )
 }
 
-function Scene({ players, setPlayers, gameState }) {
+function Scene({ players, setPlayers, gameState, setGameState }) {
   return (
     <>
       <PerspectiveCamera makeDefault position={[0, 3, 5]} />
