@@ -92,6 +92,8 @@ function Player({ isLocal, playerId, initialPosition, initialRotation, players, 
   const deathRotation = useRef(0)
   const fallSpeed = useRef(0)
 
+  const currentPlayer = players.find(p => p.id === playerId)
+
 
 
   // Consolidated shooting handler
@@ -167,7 +169,7 @@ function Player({ isLocal, playerId, initialPosition, initialRotation, players, 
 
     // Handle death animation
     const player = players.find(p => p.id === playerId)
-
+    
     if (player?.health <= 0) {
       // Rotate and fall
       deathRotation.current += delta * 5 // Rotation speed
@@ -356,8 +358,8 @@ function Player({ isLocal, playerId, initialPosition, initialRotation, players, 
           color={isLocal ? "hotpink" : "blue"}
           emissive={isHit ? "#ff0000" : "#000000"}
           emissiveIntensity={isHit ? 0.5 : 0}
-          opacity={player?.health <= 0 ? 0.5 : 1}
-          transparent={player?.health <= 0}
+          opacity={currentPlayer?.health <= 0 ? 0.5 : 1}
+          transparent={currentPlayer?.health <= 0}
           />
 
         {/* Floating health bar */}
